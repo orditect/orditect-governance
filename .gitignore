@@ -1,0 +1,36 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.idea/
+.vscode/
+.pytest_cache/
+*.tmp
+data/
+# IDE
+
+*.swp
+*.swo
+
+# Python
+
+# Build
+
+*.whl
+
+# Virtual env
+
+env/
+
+# Data
+
+*.db
+*.sqlite
+
+# OS
+.DS_Store
+Thumbs.db

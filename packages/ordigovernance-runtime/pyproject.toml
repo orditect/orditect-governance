@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ordigovernance-runtime"
+version = "0.1.0"
+description = "Mechanism-direct runtime for ordigovernance governance"
+requires-python = ">=3.12"
+license = { text = "SUL-1.0" }
+dependencies = [
+    "ordigovernance-api>=0.1.0",
+    "orditect-flow>=0.1.0",
+    "orditect-protocol>=0.1.0",
+    "orditect-stream>=0.1.0",
+    "orditect-adapter-local>=0.1.0",
+    "orditect-adapter-ui>=0.1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ordigovernance"
+version = "0.1.0"
+description = "Open governance components over the orditect framework: protocols, mechanisms, bridges and viewer"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "SUL-1.0" }
+dependencies = [
+    "ordigovernance-api>=0.1.0",
+    "ordigovernance-runtime>=0.1.0",
+]
+
+[project.optional-dependencies]
+viewer = ["ordigovernance-viewer>=0.1.0"]
+testing = ["ordigovernance-testing>=0.1.0"]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+all = [
+    "ordigovernance-viewer>=0.1.0",
+    "ordigovernance-testing>=0.1.0",
+]
+
+[tool.setuptools]
+packages = []
+
+[tool.setuptools.package-data]

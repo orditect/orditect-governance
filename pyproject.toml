@@ -1,0 +1,20 @@
+# Workspace tooling configuration for the orditect-governance repo.
+# The repository root is NOT a package: distributions live under
+# packages/* (ordigovernance-api, ordigovernance-runtime, ...).
+# This file only carries shared pytest and ruff configuration.
+
+[tool.pytest.ini_options]
+testpaths = ["packages"]
+asyncio_mode = "strict"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"
+extend-exclude = ["**/egg-info/**", "data/**"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/tests/*" = ["B011"]
