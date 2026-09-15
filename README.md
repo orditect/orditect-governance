@@ -30,7 +30,7 @@ distributions:
 | `ordigovernance-runtime` | mechanism-direct runtime: governed agents/tools, archive, lifecycle, patterns, streams, replay mechanics |
 | `ordigovernance-testing` | golden trace normalization, conformance kit, in-memory hot-path fixtures, deterministic mocks |
 | `ordigovernance-viewer` | cold-path FastAPI routers + dashboard UI |
-| `ordigovernance-bridges-*` | thin format-translation shells (direct / langgraph / deepagents) |
+| `ordigovernance-bridges-*` | thin format-translation shells (direct / langgraph / deepagents) — **verified against real endpoints** |
 
 Naming: the repository is **orditect-governance**, the namespace is
 `ordigovernance`, distributions are named `ordigovernance-*`.
@@ -142,6 +142,21 @@ in-memory hot path (CI-friendly, zero infrastructure):
 The self-check runs the workflow twice and asserts the two trace
 bundles are structurally identical and pass the producer conformance
 profile.
+
+### Real-endpoint verification
+
+The acceptance narrative runs over a live model without mocks for
+LLM calls (the world stays deterministic: mock tool handlers). This
+is the functional verification ground for real model behavior:
+
+    cp .env.example .env   # OPENAI_BASE_URL / OPENAI_API_KEY
+    python -m examples.acceptance.real_app
+
+Expect: 31+ events, real token usage on every llm_call, HITL
+pause/resume settling cancelled then rerunning on a second
+generation, an explicit reopen charging the world read twice, and
+the quality gate converging when the model's parsed score passes
+the threshold (iteration count is evidence, not script).
 
 ## Testing
 
