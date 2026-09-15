@@ -1,3 +1,4 @@
+
 """build_tracked_agent: assemble a deepagents agent over tracked atoms.
 
 Status: SKELETON. The deepagents package API surface is not pinned by
@@ -39,7 +40,7 @@ def build_tracked_agent(tracked_llm: TrackedLLMProtocol,
     except ImportError:
         raise ImportError(
             "bridges.deepagents requires the deepagents package: "
-            "pip install orditect-components[deepagents]"
+            "pip install ordigovernance-bridges-deepagents[deepagents]"
         ) from None
 
     model = LangChainTrackedLLM(tracked=tracked_llm)

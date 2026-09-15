@@ -7,15 +7,14 @@ policy routing, drift attribution) plugs in behind the api protocols
 at assembly time.
 """
 
-from ordigovernance.runtime.agent.context import AgentContext, PassthroughResolver
+from ordigovernance.runtime.agent.context import (
+    AgentContext,
+    PassthroughResolver,
+)
 from ordigovernance.runtime.agent.governed_agent import (
     AgentProtocol,
     GovernedAgent,
     assemble_agent,
-)
-from ordigovernance.runtime.atoms import (
-    PassthroughTrackedLLM,
-    PassthroughTrackedToolSet,
 )
 from ordigovernance.runtime.archive.archive import (
     archive_generation,
@@ -24,19 +23,19 @@ from ordigovernance.runtime.archive.archive import (
     load_pinned_by,
     pinned_by_key,
 )
-from ordigovernance.runtime.replay.spec import (
-    ReplayInput,
-    ReplayRangeReport,
-    ReplayReport,
-    ReplaySpec,
+from ordigovernance.runtime.atoms import (
+    PassthroughTrackedLLM,
+    PassthroughTrackedToolSet,
 )
-from ordigovernance.runtime.replay.topo_sort import subgraph_between, topo_order
-from ordigovernance.runtime.task.governed_task import (
-    GenerationMeta,
-    GovernedTask,
-    TaskIO,
+from ordigovernance.runtime.patterns import (
+    FanOutPattern,
+    FanOutResult,
+    QualityGateConfig,
+    QualityGateOutcome,
+    QualityGatePattern,
+    RecursiveComposition,
+    ScriptedBeat,
 )
-from ordigovernance.runtime.tools.governed_tools import GovernedToolSet
 from ordigovernance.runtime.replay.driver import ReplayDriver
 from ordigovernance.runtime.replay.spec import (
     ReplayInput,
@@ -44,13 +43,24 @@ from ordigovernance.runtime.replay.spec import (
     ReplayReport,
     ReplaySpec,
 )
-from ordigovernance.runtime.replay.topo_sort import subgraph_between, topo_order
+from ordigovernance.runtime.replay.topo_sort import (
+    subgraph_between,
+    topo_order,
+)
+from ordigovernance.runtime.task.governed_task import (
+    GenerationMeta,
+    GovernedTask,
+    TaskIO,
+)
+from ordigovernance.runtime.tools.governed_tools import GovernedToolSet
 
 __version__ = "0.1.0"
 
 __all__ = [
     "AgentContext",
     "AgentProtocol",
+    "FanOutPattern",
+    "FanOutResult",
     "GenerationMeta",
     "GovernedAgent",
     "GovernedTask",
@@ -58,11 +68,16 @@ __all__ = [
     "PassthroughResolver",
     "PassthroughTrackedLLM",
     "PassthroughTrackedToolSet",
+    "QualityGateConfig",
+    "QualityGateOutcome",
+    "QualityGatePattern",
+    "RecursiveComposition",
     "ReplayDriver",
     "ReplayInput",
     "ReplayRangeReport",
     "ReplayReport",
     "ReplaySpec",
+    "ScriptedBeat",
     "TaskIO",
     "archive_generation",
     "assemble_agent",

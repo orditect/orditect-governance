@@ -2,7 +2,8 @@
 
 Mirrors the quickstart smoke gate: drives the acceptance run once and
 asserts the terminal status, a non-empty audit stream, and the
-two-generation beat on the reopened researcher.
+two-generation beats (scope-retry reopen on researcher-1, HITL
+pause/resume on researcher-2).
 """
 
 from __future__ import annotations
@@ -32,9 +33,20 @@ async def test_acceptance_run_settles_succeeded(tmp_path):
         (trace_dir / "snapshots.ndjson").read_text().splitlines()
         if x.strip()
     ]
-    eids = {
-        s.get("data", s).get("execution_id")
-        for s in snapshot_lines
-        if s.get("data", s).get("task_id") == RESEARCHERS[0]
-    }
-    assert len(eids) == 2, "reopened researcher must carry two generations"
+
+    def _rows(task_id):
+        return [
+            s.get("data", s) for s in snapshot_lines
+            if s.get("data", s).get("task_id") == task_id
+        ]
+
+    r1_eids = {r.get("execution_id") for r in _rows(RESEARCHERS[0])}
+    assert len(r1_eids) == 2, \
+        "reopened researcher-1 must carry two generations"
+
+    r2_rows = _rows(RESEARCHERS[1])
+    r2_eids = {r.get("execution_id") for r in r2_rows}
+    assert len(r2_eids) == 2, \
+        "paused/resumed researcher-2 must carry two generations"
+    assert "cancelled" in {r.get("status") for r in r2_rows}, \
+        "the HITL pause beat must settle one cancelled generation"

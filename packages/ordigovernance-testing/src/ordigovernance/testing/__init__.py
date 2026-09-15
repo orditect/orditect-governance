@@ -21,6 +21,12 @@ from ordigovernance.testing.golden import (
     save_golden,
     summarize,
 )
+from ordigovernance.testing.hot_path import (
+    MemoryLimiterRegistry,
+    MemoryQuota,
+    MemoryTaskStorage,
+    build_memory_hot_path,
+)
 from ordigovernance.testing.mock_llm import ScriptedLLMClient
 from ordigovernance.testing.mock_tools import (
     configure_memory_body,
@@ -31,28 +37,19 @@ from ordigovernance.testing.mock_tools import (
     vector_query,
     web_search,
 )
-# Re-export the mock_tools submodule so `from ordigovernance.testing import mock_tools`
-# works as a namespace import.
+# Re-export the mock_tools submodule so that
+# `from ordigovernance.testing import mock_tools` works as a namespace import.
 from ordigovernance.testing import mock_tools  # noqa: F401
-
-from ordigovernance.testing.hot_path import (
-    MemoryLimiterRegistry,
-    MemoryQuota,
-    MemoryTaskStorage,
-    build_memory_hot_path,
-)
-from ordigovernance.testing.hot_path import (
-    MemoryLimiterRegistry,
-    MemoryQuota,
-    MemoryTaskStorage,
-    build_memory_hot_path,
-)
 
 __all__ = [
     "BUNDLE_FILES",
     "BUSINESS_VARIANCE_PATTERNS",
+    "MemoryLimiterRegistry",
+    "MemoryQuota",
+    "MemoryTaskStorage",
     "ScriptedLLMClient",
     "VOLATILE_KEYS",
+    "build_memory_hot_path",
     "check_archive_document",
     "check_call_id_shape",
     "check_memo_envelope",
@@ -74,12 +71,4 @@ __all__ = [
     "summarize",
     "vector_query",
     "web_search",
-    "MemoryLimiterRegistry",
-    "MemoryQuota",
-    "MemoryTaskStorage",
-    "build_memory_hot_path",
-    "MemoryLimiterRegistry",
-    "MemoryQuota",
-    "MemoryTaskStorage",
-    "build_memory_hot_path",
 ]

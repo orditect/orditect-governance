@@ -4,7 +4,7 @@ Open governance components over the orditect framework: protocols,
 mechanisms, bridges and the viewer that make any agentic workflow
 auditable and replayable.
 
-Naming: this repository is **orditect-graph**; the PEP 420 namespace
+Naming: this repository is **orditect-governance**; the PEP 420 namespace
 is `ordigovernance.*`; distributions are named `ordigovernance-*`.
 
 Packages (PEP 420 namespace `ordigovernance.*`, independently versioned):

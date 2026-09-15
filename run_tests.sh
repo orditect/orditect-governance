@@ -16,6 +16,7 @@ SUITES=(
     "packages/ordigovernance-viewer/tests"
     "packages/ordigovernance-testing/tests"
     "packages/ordigovernance-bridges-langgraph/tests"
+    "packages/ordigovernance-bridges-direct/tests"
 )
 
 for suite in "${SUITES[@]}"; do
@@ -37,6 +38,16 @@ for suite in "${SUITES[@]}"; do
     echo
 done
 
+echo "================================================================"
+echo ">>> acceptance self-check"
+echo "================================================================"
+if python -m examples.acceptance.selfcheck; then
+    PASSED+=("acceptance-selfcheck")
+else
+    FAILED+=("acceptance-selfcheck")
+fi
+
+echo
 echo "================================================================"
 echo ">>> import boundary"
 echo "================================================================"

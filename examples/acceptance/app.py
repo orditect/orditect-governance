@@ -1,8 +1,9 @@
 """Open-tier acceptance workflow: one full governed run, in-memory.
 
-Flow: root -> fan-out (3 researchers) -> quality gate (writer/review,
-scripted 62 -> 88) -> HITL pause/resume beat -> one explicit reopen
-(second generation for researcher-1) -> publish (archive + pins).
+Flow: root -> fan-out (3 researchers, with an HITL pause/resume beat
+on researcher-2) -> quality gate (writer/review, scripted 62 -> 88) ->
+one explicit reopen (researcher-1's second generation via the sink's
+scope retry) -> publish (archive + pins).
 
 The world is deterministic (mock tool handlers), the model is
 scripted (a governed wrapper over ScriptedLLMClient), and every call
@@ -231,8 +232,17 @@ def _build_hot_path() -> dict:
     })
 
 
-async def execute_acceptance_run(trace_dir: Path) -> dict:
-    """Drive the full workflow; returns the publish terminal record."""
+async def execute_acceptance_run(
+        trace_dir: Path, *,
+        memo_layer_factory=None,
+        resolver_factory=None) -> dict:
+    """Drive the full workflow; returns the publish terminal record.
+
+    memo_layer_factory / resolver_factory: optional engine plug-ins,
+    forwarded to every GovernedAgent in the run. The acceptance ground
+    uses them to prove the assembly contract end to end (spies record
+    the factories' arguments and the memoize delegation).
+    """
     hot = _build_hot_path()
     holder: dict = {}
     beats = ScriptedBeat(score_sequence=(62, 88), pass_threshold=80)
@@ -268,6 +278,8 @@ async def execute_acceptance_run(trace_dir: Path) -> dict:
         return GovernedAgent(
             impl=impl, task_io=hot["storage"], tools=tools, llms=llms,
             archive_backend=tools, memo_scope="acceptance",
+            memo_layer_factory=memo_layer_factory,
+            resolver_factory=resolver_factory,
         )
 
     async def task_factory(task_id: str):
@@ -299,7 +311,19 @@ async def execute_acceptance_run(trace_dir: Path) -> dict:
         ])
         orch = resources.orchestrator
 
-        # Fan-out.
+        # The scope root must be a REAL terminal record before any
+        # sink-driven reopen: retry_scope reopens the root plus every
+        # ancestor on the path and rejects non-terminal (or missing)
+        # ancestors (see docs/pitfalls.md). The quality gate reopens
+        # through the same root below.
+        await hot["storage"].initialize_task(
+            ROOT_ID, initial_status="succeeded")
+
+        # HITL beat: pause researcher-2 inside its cooperative delay
+        # window. The cancel flag flips while the window is open; the
+        # node settles as cancelled.
+        pauser = asyncio.create_task(
+            _cancel_after_delay(hot["storage"], RESEARCHERS[1], 0.05))
         fanout = FanOutPattern(orch, hot["storage"],
                                edge_io=resources.store.dependency,
                                step_timeout=60.0)
@@ -308,10 +332,33 @@ async def execute_acceptance_run(trace_dir: Path) -> dict:
             build_child_id=lambda topic: topic,
             build_child=lambda topic, cid: make_agent(
                 cid, ResearcherImpl(cid, hot["storage"])),
+            # Drive-layer fan-out: no executing supervisor node, so the
+            # snapshot parent must be passed explicitly. Without it the
+            # children's parentage is empty and resume_tree/retry_scope
+            # walk an empty tree (the action returns a receipt with
+            # rerun=0 and the workflow hangs).
+            parent_task_id=ROOT_ID,
         )
-        if result.failed or result.cancelled:
+        await pauser
+        if result.failed:
+            raise RuntimeError(f"fan-out failed: {result.failed}")
+        if result.cancelled != (RESEARCHERS[1],):
             raise RuntimeError(
-                f"fan-out failed: {result.failed} {result.cancelled}")
+                f"HITL pause did not land as scripted: "
+                f"cancelled={result.cancelled}")
+
+        # Resume the paused node via resume_tree: succeeded nodes are
+        # reused, the cancelled one reruns on a new generation.
+        r2_gen1 = (await hot["storage"].get_task(RESEARCHERS[1]))[
+            "execution_id"]
+        receipt = await resources.sink.resume_tree(
+            ROOT_ID, actor="hitl-acceptance")
+        await _wait_receipt(resources, receipt.action_id)
+        resumed = await _wait_new_generation(
+            hot["storage"], RESEARCHERS[1], r2_gen1, timeout=60.0)
+        if resumed["status"] != "succeeded":
+            raise RuntimeError(
+                f"resumed researcher failed: {resumed['status']}")
 
         # Quality gate: writer <-> review, scripted 62 -> 88.
         gate = QualityGatePattern(
@@ -332,24 +379,22 @@ async def execute_acceptance_run(trace_dir: Path) -> dict:
         if not outcome.passed:
             raise RuntimeError("quality gate did not converge")
 
-        # Second-generation beat: reopen researcher-1 via the sink's
-        # scope retry (the same reopen path as HITL), so the executor
-        # really reruns it instead of being idempotently skipped by a
-        # manual reopen+submit (if_not_exists would dedup it away).
-        receipt = await resources.sink.retry_scope(
-            ROOT_ID, {RESEARCHERS[0]}, actor="acceptance")
-        await _wait_receipt(resources, receipt.action_id)
-        record = await orch.wait_terminal(RESEARCHERS[0],
-                                          timeout=60.0)
-        if record["status"] != "succeeded":
-            raise RuntimeError(
-                f"reopened researcher failed: {record['status']}")
+        # Second-generation beat: direct reopen + resubmit of researcher-1.
+        # retry_scope only reruns FAILED nodes; resume_tree only reruns
+        # failed/cancelled ones. A rerun of a SUCCEEDED node must go
+        # through the explicit reopen + submit path.
+        r1_gen1 = (await hot["storage"].get_task(RESEARCHERS[0]))[
+            "execution_id"]
         await hot["storage"].reopen_task(RESEARCHERS[0])
         await orch.submit(
             make_agent(RESEARCHERS[0],
                        ResearcherImpl(RESEARCHERS[0], hot["storage"])),
             task_id=RESEARCHERS[0])
-        await orch.wait_terminal(RESEARCHERS[0], timeout=60.0)
+        reopened = await _wait_new_generation(
+            hot["storage"], RESEARCHERS[0], r1_gen1, timeout=60.0)
+        if reopened["status"] != "succeeded":
+            raise RuntimeError(
+                f"reopened researcher failed: {reopened['status']}")
 
         await orch.submit(make_agent(PUBLISH_ID,
                                      PublishImpl(hot["storage"])),
@@ -362,14 +407,47 @@ async def execute_acceptance_run(trace_dir: Path) -> dict:
 
 async def _wait_receipt(resources, action_id: str,
                         timeout: float = 15.0) -> None:
-    """Best-effort wait for an action's execution receipt."""
+    """Best-effort wait for an action's execution receipt.
+
+    The receipt is logged in full: a receipt with status "rejected" or
+    "reuse=0, rerun=0" is the first thing to check when a sink action
+    returns but nothing reruns.
+    """
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         receipt = await resources.sink.get_receipt(action_id)
         if receipt is not None:
+            log.info("action %s receipt: %s", action_id, receipt)
             return
         await asyncio.sleep(0.2)
+
+async def _cancel_after_delay(storage, task_id: str, delay: float) -> None:
+    """Flip the cancel flag after the cooperative window has opened."""
+    await asyncio.sleep(delay)
+    await storage.request_cancel(task_id)
+
+
+async def _wait_new_generation(storage, task_id: str, previous_eid: str,
+                               *, timeout: float,
+                               poll: float = 0.1) -> dict:
+    """Wait until the hot record carries a NEW terminal generation.
+
+    A plain wait_terminal is a false positive here: the record still
+    holds the previous (already terminal) generation until the recovery
+    service's rerun lands, so the wait must key on the eid change.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
+        record = await storage.get_task(task_id)
+        if (record.get("execution_id") != previous_eid
+                and record.get("status")
+                in ("succeeded", "failed", "cancelled")):
+            return record
+        await asyncio.sleep(poll)
+    raise TimeoutError(
+        f"{task_id} never settled a new generation after {previous_eid}")
 
 def main() -> int:
     logging.basicConfig(level=logging.INFO,

@@ -21,3 +21,6 @@ deepagents = ["deepagents>=0.1"]
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = true
+
+[tool.setuptools.package-data]
+"ordigovernance.bridges.deepagents" = ["py.typed"]

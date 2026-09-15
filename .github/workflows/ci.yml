@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this repository
+        uses: actions/checkout@v4
+
+      - name: Check out the orditect framework (sibling repo)
+        uses: actions/checkout@v4
+        with:
+          repository: orditect/orditect
+          path: orditect
+          # Pin a ref once the framework tags releases; main is the
+          # development default while both repos co-evolve.
+          ref: main
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install the orditect framework from the sibling checkout
+        run: |
+          pip install -e ./orditect/packages/protocol
+          pip install -e ./orditect/packages/core
+          pip install -e ./orditect/packages/flow
+          pip install -e ./orditect/packages/stream
+          pip install -e ./orditect/packages/adapter-memory
+          pip install -e ./orditect/packages/adapter-local
+          pip install -e ./orditect/packages/adapter-ui
+          pip install -e ./orditect/packages/bridge-openai
+
+      - name: Install the ordigovernance packages
+        run: |
+          pip install -e "./packages/ordigovernance-api[dev]"
+          pip install -e "./packages/ordigovernance-runtime[dev]"
+          pip install -e "./packages/ordigovernance-testing[dev]"
+          pip install -e "./packages/ordigovernance-viewer[dev,quickstart]"
+          pip install -e "./packages/ordigovernance-bridges-langgraph[dev]"
+          pip install -e "./packages/ordigovernance-bridges-direct[dev]"
+          pip install -e "./packages/ordigovernance[all,dev]"
+
+      - name: Runtime suite
+        run: python -m pytest packages/ordigovernance-runtime/tests -q
+
+      - name: Viewer suite (includes the quickstart smoke gate)
+        run: python -m pytest packages/ordigovernance-viewer/tests -q
+
+      - name: Testing suite
+        run: python -m pytest packages/ordigovernance-testing/tests -q
+
+      - name: Bridges suites
+        run: |
+          python -m pytest packages/ordigovernance-bridges-langgraph/tests -q
+          python -m pytest packages/ordigovernance-bridges-direct/tests -q
+
+      - name: Acceptance self-check (two runs diff empty + conformance)
+        run: python -m examples.acceptance.selfcheck
+
+      - name: Import boundary gate
+        run: python scripts/check_import_boundary.py

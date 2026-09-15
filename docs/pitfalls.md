@@ -97,15 +97,20 @@ The last log line before the timeout IS the stuck await. Two
 iterations of this located every issue above faster than any
 reading of pytest output.
 
-## 7. Editable installs and IDE red herrings
+## 7. PEP 420 namespace packages require ONE editable mode everywhere
 
 Setuptools' default editable mode (import hooks, not .pth paths)
-confuses PyCharm/VSCode into "Cannot find reference" for PEP 420
-namespaces. Verify with `python -c "import ..."` first — if the
-runtime import works, it is an IDE indexing issue, not packaging.
-Fix: `pip install -e ... --config-settings editable_mode=compat`,
-or mark each package's `src/` as Sources Root. Never "fix" code to
-satisfy an IDE error that the interpreter does not share.
+both confuses IDE indexing ("Cannot find reference") and is fragile
+for namespace subpackages: mixing strict (default) and compat
+installs across the eight `ordigovernance-*` distributions silently
+makes some subpackages unimportable at runtime
+(`ModuleNotFoundError: ordigovernance.runtime` while
+`pip list` shows it installed). Verify with `python -c "import ..."`
+first — if the runtime import works, an IDE error is indexing, not
+packaging. **Rule**: install ALL governance packages with
+`--config-settings editable_mode=compat`; never mix modes inside one
+namespace; the `orditect-*` framework packages are an independent
+namespace and can stay on the default mode.
 
 ## 8. Protocol isinstance checks need @runtime_checkable
 
@@ -114,3 +119,34 @@ the protocol is decorated with `@runtime_checkable`. The api
 package's engine plug-in protocols (MemoLayerProtocol,
 PolicyResolverProtocol) are explicitly structural-check targets —
 keep the decorator on every protocol that tests assert against.
+
+## 9. Sink action rerun semantics are status-dependent
+
+`retry_scope(root, {target})` reruns only FAILED nodes; `resume_tree`
+reruns failed/cancelled nodes and reuses succeeded ones. Neither
+reruns a SUCCEEDED node. A receipt returning successfully never
+implies a rerun happened — the receipt's `reuse=/rerun=` tallies are
+the only truth. HITL resume of a cancelled node uses `resume_tree`;
+a deliberate second generation of a succeeded node uses direct
+`reopen_task + submit`. Locked by the acceptance ground's two beats.
+
+## 10. Drive-layer fan-outs must pass parent_task_id explicitly
+
+Sink tree actions (resume_tree / retry_scope) walk the SNAPSHOT
+parentage, not the declared dependency edges. Inside an executing
+supervisor node the executor's contextvar injects the parent
+automatically (pitfall 1.1); a fan-out driven directly from the
+drive layer has no executing node, so every child is submitted with
+`parent=None` and tree actions walk an empty tree (receipt says
+`rerun=0`, the workflow hangs downstream). FanOutPattern accepts
+`parent_task_id` for exactly this case; inside a node it must stay
+None. Locked by test_fanout.py.
+
+## 11. selfcheck trace_dir must be a SUBDIRECTORY of the temp root
+
+`build_run_context` cleans `trace_dir.parent`. If the caller passes a
+bare `tempfile.mkdtemp()` path as trace_dir, the parent is /tmp and
+the NEXT run's cleanup silently deletes the PREVIOUS run's bundle
+before any diff — the diff then reads an empty directory and reports
+phantom "0 != 45" divergences. Rule: trace_dir = mkdtemp()/"trace".
+Locked by examples/acceptance/selfcheck.py.

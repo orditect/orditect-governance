@@ -30,12 +30,16 @@ from ordigovernance.testing.golden import (
 
 
 async def _run_once() -> Path:
-    trace_dir = Path(tempfile.mkdtemp(prefix="ordigovernance-acceptance-"))
+    # trace_dir must be a SUBDIRECTORY of the mkdtemp path:
+    # build_run_context cleans trace_dir.parent. A bare mkdtemp path
+    # would make the parent /tmp, so the second run's cleanup would
+    # silently delete the first run's bundle before the diff.
+    trace_dir = Path(tempfile.mkdtemp(
+        prefix="ordigovernance-acceptance-")) / "trace"
     record = await execute_acceptance_run(trace_dir)
     if record["status"] != "succeeded":
         raise RuntimeError(f"acceptance run failed: {record['status']}")
     return trace_dir
-
 
 def main() -> int:
     dir_a = asyncio.run(_run_once())

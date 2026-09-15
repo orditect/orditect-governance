@@ -58,6 +58,8 @@ async def test_quickstart_executes_end_to_end(tmp_path, capsys):
     assert generations == {RESEARCHERS[0]}
     assert len(eids) == 2, "reopened researcher must carry two generations"
 
+    # The same contract the viewer's /validate endpoint reports: a
+    # non-empty bundle validates as available with zero violations.
     from orditect.protocol.rules import run_rules
 
     lines = []
@@ -68,4 +70,13 @@ async def test_quickstart_executes_end_to_end(tmp_path, capsys):
                 json.loads(x) for x in path.read_text().splitlines()
                 if x.strip()
             )
-    assert lines, "trace bundle must be non-empty"
+    assert lines, "validate must report available=True for the bundle"
+    report = run_rules(lines)
+    violations = []
+    for finding in getattr(report, "findings", []):
+        severity = getattr(finding, "severity", None)
+        severity = getattr(severity, "value", severity)
+        if str(severity).lower() == "violation":
+            violations.append(finding)
+    assert not violations, (
+        f"quickstart bundle must validate without violations: {violations}")

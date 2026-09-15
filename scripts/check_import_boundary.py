@@ -24,11 +24,11 @@ ROOT = Path(__file__).resolve().parents[1]
 PACKAGES_DIR = ROOT / "packages"
 
 # Closed-tier namespaces that packaged open code must never import.
-# Extend this list as the closed tier names its distributions.
+# `orditect_components` is the archived legacy monorepo; `ordienterprise`
+# is the closed commercial tier built on top of this stack.
 CLOSED_NAMESPACES = (
     "orditect_components",
-    "ordigovernance_engine",
-    "ordigovernance_insight",
+    "ordienterprise",
 )
 
 _IMPORT_RE = re.compile(
@@ -59,6 +59,17 @@ def _imports_of(path: Path) -> list[str]:
     return _IMPORT_RE.findall(text)
 
 
+def _is_internal_api_import(module: str) -> bool:
+    """Internal self-imports inside ordigovernance-api.
+
+    The api package may import its own submodules only; anything else
+    under the ordigovernance namespace (runtime, testing, ...) is a
+    reverse dependency and must fail the gate.
+    """
+    return module == "ordigovernance.api" \
+        or module.startswith("ordigovernance.api.")
+
+
 def check() -> list[str]:
     findings: list[str] = []
     for package, path in _iter_package_sources():
@@ -72,9 +83,10 @@ def check() -> list[str]:
                 findings.append(
                     f"{rel}: packaged code must not import 'examples'")
             if package == "ordigovernance-api" \
-                    and top not in _STDLIB and top != "ordigovernance":
-                # api stays free of EXTERNAL third-party deps; its own
-                # subpackage imports (ordigovernance.api.*) are internal.
+                    and top not in _STDLIB \
+                    and not _is_internal_api_import(module):
+                # api stays free of EXTERNAL third-party deps; only its
+                # own subpackage imports are internal.
                 findings.append(
                     f"{rel}: ordigovernance-api must stay free of external "
                     f"dependencies (found {module!r})")

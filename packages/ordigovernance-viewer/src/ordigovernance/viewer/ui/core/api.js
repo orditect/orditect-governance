@@ -2,7 +2,9 @@
 
 All endpoints are parameterized by run_id; the client knows nothing
 about run lifecycle or business semantics. Base URL is injected so the
-same client works against any deployment root.
+same client works against any deployment root. Showcase/forest/demo
+endpoints are app-private and live in the consuming application's own
+copy of this client, never in the shared viewer package.
 */
 
 export function initApi({ baseUrl = "", fetchImpl = fetch } = {}) {
@@ -50,36 +52,6 @@ export function initApi({ baseUrl = "", fetchImpl = fetch } = {}) {
                 { method: "POST" }),
     hitlReceipt: (actionId) =>
       json(`/api/hitl/receipt/${encodeURIComponent(actionId)}`),
-    localReplay: (payload) =>
-      fetchImpl(`${baseUrl}/api/local/replay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
     getConfig: () => json("/api/config"),
-    getCost: (runId) =>
-      json(`/api/showcase/cost/${encodeURIComponent(runId)}`),
-    getImpact: (runId, taskId) =>
-      json(`/api/showcase/impact/${encodeURIComponent(runId)}/` +
-           `${encodeURIComponent(taskId)}`),
-    getDrift: (runId, taskId) =>
-      json(`/api/showcase/drift/${encodeURIComponent(runId)}/` +
-           `${encodeURIComponent(taskId)}`),
-    postShowcaseReplay: (payload) =>
-      fetchImpl(`${baseUrl}/api/showcase/replay`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }),
-    getShowcaseConfig: () => json("/api/showcase/config"),
-    getForest: (runId) =>
-      json(`/api/showcase/forest/${encodeURIComponent(runId)}`),
-    postForestRun: (runId) =>
-      fetchImpl(`${baseUrl}/api/showcase/forest/run`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ run_id: runId }),
-      }),
   };
-
 }

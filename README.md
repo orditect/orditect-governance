@@ -77,15 +77,37 @@ source checkout, not from PyPI:
 
 ## Install
 
-    pip install -e ./packages/ordigovernance-api
-    pip install -e ./packages/ordigovernance-runtime
-    pip install -e ./packages/ordigovernance-testing
-    pip install -e "./packages/ordigovernance-viewer[quickstart]"
-    pip install -e ./packages/ordigovernance-bridges-langgraph
-    pip install -e ./packages/ordigovernance          # meta package
+The 8 governance distributions share one PEP 420 namespace
+(`ordigovernance.*`). Setuptools' default editable mode resolves it
+through an import hook, which is fragile for namespace subpackages —
+and mixing strict and compat editable installs across these packages
+silently makes some subpackages unimportable. Install ALL governance
+packages with the compat mode (plain .pth paths) from the start:
 
-For IDE-friendly editable installs (PyCharm/VSCode indexing), append
-`--config-settings editable_mode=compat`.
+    pip install -e "./packages/ordigovernance-api[dev]" --config-settings editable_mode=compat
+    pip install -e "./packages/ordigovernance-runtime[dev]" --config-settings editable_mode=compat
+    pip install -e "./packages/ordigovernance-testing[dev]" --config-settings editable_mode=compat
+    pip install -e "./packages/ordigovernance-viewer[dev,quickstart]" --config-settings editable_mode=compat
+    pip install -e "./packages/ordigovernance-bridges-langgraph[dev]" --config-settings editable_mode=compat
+    pip install -e "./packages/ordigovernance-bridges-direct[dev]" --config-settings editable_mode=compat
+    pip install -e "./packages/ordigovernance-bridges-deepagents[dev]" --config-settings editable_mode=compat
+    pip install -e "./packages/ordigovernance[all,dev]" --config-settings editable_mode=compat
+
+Compat mode also fixes PyCharm/VSCode indexing out of the box.
+
+**Editable-mode discipline**: if you ever reinstall one governance
+package, reinstall ALL of them with the SAME mode — never mix strict
+and compat across the `ordigovernance.*` namespace. The safest reset
+is a full uninstall plus the block above:
+
+    pip uninstall -y ordigovernance ordigovernance-api \
+        ordigovernance-runtime ordigovernance-testing \
+        ordigovernance-viewer ordigovernance-bridges-langgraph \
+        ordigovernance-bridges-direct ordigovernance-bridges-deepagents
+
+The `orditect-*` framework packages (see Framework dependency) are
+installed with plain `pip install -e` and do NOT need the compat
+flag; the two namespaces are independent.
 
 ## Quickstart
 
@@ -168,5 +190,23 @@ snapshot bundle, never from shared hot records.
 
 ## License
 
-Engine packages are licensed under the Sustainable Use License (see
-LICENSE). Bridges published from their own repositories are MIT.
+Engine packages (`ordigovernance-api`, `ordigovernance-runtime`,
+`ordigovernance-testing`, `ordigovernance-viewer`,
+`ordigovernance-bridges-direct`, the meta package `ordigovernance`)
+are licensed under the Sustainable Use License 1.0 — see [LICENSE](LICENSE).
+The SUL permits any use except offering the Software as a competing
+hosted or managed service.
+
+Ecosystem bridges published from their own repositories
+(`ordigovernance-bridges-langgraph`,
+`ordigovernance-bridges-deepagents`) are MIT-licensed there; the
+skeletons frozen in this repository follow the repository license
+until they move out.
+
+### Trademark
+
+"orditect" and "ordigovernance" are trademarks of the orditect
+project (github.com/orditect). This license does not grant any right
+to use those names, logos, or marks. Third parties may refer to the
+projects nominatively but must not use the marks in a way that
+suggests endorsement or affiliation.

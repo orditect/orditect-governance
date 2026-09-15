@@ -19,3 +19,6 @@ dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
 [tool.setuptools.packages.find]
 where = ["src"]
 namespaces = true
+
+[tool.setuptools.package-data]
+"ordigovernance.testing" = ["py.typed"]

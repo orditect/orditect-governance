@@ -60,6 +60,7 @@ class FanOutPattern:
             build_child_id: Callable[..., str],
             build_child: Callable[..., str],
             if_not_exists: bool = True,
+            parent_task_id: str | None = None,
     ) -> FanOutResult:
         """Fan out one child per item and wait for all terminal states.
 
@@ -69,6 +70,13 @@ class FanOutPattern:
         — the legacy homogeneous shape — or (item[, child_id]); the
         callback's own signature decides. build_child_id returns the
         child task id, build_child the task instance.
+
+        parent_task_id: the snapshot parent of every child. Inside an
+        executing supervisor node this is injected by the executor's
+        contextvar and must stay None; a drive-layer fan-out (no
+        executing node) MUST pass it explicitly, or the children's
+        snapshot parentage stays empty and sink actions that walk the
+        tree (resume_tree / retry_scope) cannot find them.
         """
         id_params = len(inspect.signature(build_child_id).parameters)
         child_params = len(inspect.signature(build_child).parameters)
@@ -92,6 +100,7 @@ class FanOutPattern:
                 _make_child(position, item, child_id),
                 task_id=child_id,
                 if_not_exists=if_not_exists,
+                parent_task_id=parent_task_id,
             )
             child_ids.append(child_id)
             if self._edge_io is not None:
