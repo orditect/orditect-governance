@@ -6,7 +6,16 @@
 [tool.pytest.ini_options]
 testpaths = ["packages"]
 asyncio_mode = "strict"
-
+filterwarnings = [
+    # Upstream-only: starlette's TestClient module still references the
+    # deprecated anyio.abc.BlockingPortal alias at import time
+    # (verified present in starlette 1.6.0 with anyio 4.15.1). Not
+    # fixable from this repository; remove this entry when starlette
+    # migrates to anyio.from_thread.BlockingPortal. The ignore is
+    # pinned to the exact message + module so every other warning,
+    # including future starlette deprecations, stays visible.
+    "ignore:The anyio\\.abc\\.BlockingPortal alias is deprecated:DeprecationWarning:starlette",
+]
 [tool.ruff]
 line-length = 88
 target-version = "py312"

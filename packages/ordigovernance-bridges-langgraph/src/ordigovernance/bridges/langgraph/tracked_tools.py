@@ -49,6 +49,12 @@ def as_langchain_tools(tracked: TrackedToolSetProtocol,
     Frameworks inject these into agents; the tracked set decides memo
     identity from the tool kwargs (content-addressed), so framework
     call-site variance never affects reuse.
+
+    Real-endpoint discipline: always pass an explicit args_schema for
+    tools invoked by a real model. The passthrough capture schema
+    exists for deterministic tests; a real model fills parameters
+    unreliably when the advertised parameter surface is a single
+    opaque "kwargs" object.
     """
     tools: list[StructuredTool] = []
     for name, spec in specs.items():

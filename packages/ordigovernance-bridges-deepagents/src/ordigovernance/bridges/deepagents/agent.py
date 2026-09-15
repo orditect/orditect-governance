@@ -36,9 +36,14 @@ def build_tracked_agent(tracked_llm: TrackedLLMProtocol,
 
     tool_specs: {name: {"description": str, "args_schema": ...}} — the
     framework-facing tool facts; handlers live behind tracked_tools.
-    agent_kwargs (instructions, subagents, ...) pass through to
+    agent_kwargs (system_prompt, subagents, ...) pass through to
     create_deep_agent verbatim; the two tracked objects above are the
     entire governance surface.
+
+    Version drift note: deepagents renamed the system-prompt parameter
+    from "instructions" to "system_prompt" (pinned at >=0.7); the
+    smoke test locks the factory signature against the installed
+    package, so a future rename fails here first.
     """
     if create_deep_agent is None:
         raise ImportError(

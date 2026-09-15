@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+from typing import Any
 
 from ordigovernance.api.memo import MemoBackend
 from ordigovernance.api.naming import (

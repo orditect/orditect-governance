@@ -5,6 +5,9 @@ about run lifecycle or business semantics. Base URL is injected so the
 same client works against any deployment root. Showcase/forest/demo
 endpoints are app-private and live in the consuming application's own
 copy of this client, never in the shared viewer package.
+
+Endpoint discipline: the trace router ships no /results route; run
+outputs are read per generation via getGenerationContent.
 */
 
 export function initApi({ baseUrl = "", fetchImpl = fetch } = {}) {
@@ -28,7 +31,6 @@ export function initApi({ baseUrl = "", fetchImpl = fetch } = {}) {
       json(`/api/runs/${runId}/audit` +
            (taskId ? `?task_id=${encodeURIComponent(taskId)}` : "")),
     getStats: (runId) => json(`/api/runs/${runId}/stats`),
-    getResults: (runId) => json(`/api/runs/${runId}/results`),
     validate: (runId, rootId = null) =>
       json(`/api/runs/${runId}/validate` +
            (rootId ? `?root_id=${encodeURIComponent(rootId)}` : "")),

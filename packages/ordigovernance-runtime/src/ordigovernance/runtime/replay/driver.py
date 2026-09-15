@@ -156,12 +156,19 @@ class ReplayDriver:
         """One experiment-ledger event per replayed node.
 
         The event records the experiment declaration (label, policy
-        table, sampling params, pin provenance) so a replay round is
-        traceable to the hypothesis it tested. Failures never abort
-        the replay: the ledger is observability, not control flow.
+        table, sampling params, pin provenance) plus a digest of the
+        RESOLVED pinned input, so a replay round is traceable both to
+        the hypothesis it tested and to the exact payload it ran
+        against. Failures never abort the replay: the ledger is
+        observability, not control flow.
         """
         if self._ledger_writer is None:
             return
+        import hashlib
+        import json
+
+        pin_blob = json.dumps(resolved_pin, ensure_ascii=False,
+                              sort_keys=True, default=str)
         event = {
             "type": "replay_experiment",
             "task_id": spec.task_id,
@@ -173,6 +180,9 @@ class ReplayDriver:
             "llm_params": spec.llm_params,
             "input_source": spec.input.source,
             "pin_from": spec.input.pin_from,
+            "pinned_input_keys": sorted(resolved_pin),
+            "pinned_input_digest": hashlib.sha256(
+                pin_blob.encode("utf-8")).hexdigest()[:12],
             "isolate_policy": spec.isolate_policy,
         }
         try:

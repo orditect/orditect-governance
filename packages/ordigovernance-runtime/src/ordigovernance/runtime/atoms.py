@@ -15,6 +15,16 @@ from typing import Any
 from ordigovernance.api.atoms import TrackedLLMProtocol, TrackedToolSetProtocol
 from ordigovernance.api.naming import SEQ_AGENT_BASE
 
+# Payload keys that collide with the governed call plumbing when they
+# travel through **kwargs: silent capture at this signature (inputs /
+# reuse / record_origin) or a confusing TypeError several frames down
+# (purpose / seq / params / call_id / content_fn / payload_fn). A
+# business tool whose real parameter uses one of these names must be
+# renamed before registration.
+_RESERVED_PAYLOAD_KEYS = frozenset({
+    "name", "inputs", "reuse", "record_origin",
+    "purpose", "seq", "params", "call_id", "content_fn", "payload_fn",
+})
 
 class PassthroughTrackedLLM(TrackedLLMProtocol):
     """Mechanism-direct LLM atom: governed, non-memoized."""
@@ -63,7 +73,21 @@ class PassthroughTrackedToolSet(TrackedToolSetProtocol):
             record_origin: bool = True,
             **kwargs: Any,
     ) -> Any:
-        """One governed tool call; no memo wrap."""
+        """One governed tool call; no memo wrap.
+
+        Payload keys travel through **kwargs to the handler, so they
+        must not collide with the governed plumbing (see
+        _RESERVED_PAYLOAD_KEYS); a collision fails loudly here with a
+        rename instruction instead of silently corrupting routing or
+        surfacing as a TypeError frames away from the cause.
+        """
+        collision = _RESERVED_PAYLOAD_KEYS & set(kwargs)
+        if collision:
+            raise ValueError(
+                f"tool {name!r} payload keys {sorted(collision)} collide "
+                f"with the governed call plumbing; rename the tool "
+                f"parameter (reserved: {sorted(_RESERVED_PAYLOAD_KEYS)})"
+            )
         self._seq += 1
         result = await self._ctx.tool_call(
             name, *args, purpose=name, seq=self._seq,

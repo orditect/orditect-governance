@@ -55,6 +55,13 @@ class QualityGatePattern:
         self._config = config or QualityGateConfig()
 
     async def _wait_receipt(self, action_id: str) -> None:
+        """Wait for one sink action's execution receipt.
+
+        Raises TimeoutError when the receipt never lands: silently
+        returning would let the gate block on wait_terminal for a
+        generation that was never reopened, misreporting the failure
+        as a step timeout one frame away from the cause.
+        """
         loop = asyncio.get_running_loop()
         deadline = loop.time() + self._config.receipt_timeout
         while loop.time() < deadline:
@@ -62,6 +69,10 @@ class QualityGatePattern:
             if receipt is not None:
                 return
             await asyncio.sleep(0.2)
+        raise TimeoutError(
+            f"receipt for action {action_id} not confirmed within "
+            f"{self._config.receipt_timeout}s"
+        )
 
     async def _submit_or_reopen(self, root_id: str, task_id: str,
                                 iteration: int,

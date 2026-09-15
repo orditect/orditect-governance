@@ -52,6 +52,7 @@ export function initDependency({ dom, mermaid, onSelectNode, tokenCallers = [], 
 
   let renderInFlight = false;
   let renderSeq = 0;
+  let pendingDef = null;
 
   mermaid.initialize({
     startOnLoad: false,
@@ -145,20 +146,38 @@ export function initDependency({ dom, mermaid, onSelectNode, tokenCallers = [], 
       return null;
     };
 
+    const paint = async (def) => {
+      try {
+        const { svg } = await mermaid.render(`graphSvg-${renderSeq++}`, def);
+        el.innerHTML = svg;
+        el.querySelectorAll(".node").forEach((nodeEl) => {
+          const id = resolveNodeId(nodeEl);
+          if (!id) return;
+          nodeEl.style.cursor = "pointer";
+          nodeEl.addEventListener("click", () => onSelectNode(id));
+        });
+      } catch (err) {
+        el.textContent = def;
+      }
+    };
+
     const def = lines.join("\n");
-    if (renderInFlight) return;
+    if (renderInFlight) {
+      // Coalesce to the LATEST request: intermediate frames are
+      // superseded and never need to render, but the newest state
+      // must not be dropped (a dropped frame leaves the DAG one poll
+      // behind until the next signature change).
+      pendingDef = def;
+      return;
+    }
     renderInFlight = true;
     try {
-      const { svg } = await mermaid.render(`graphSvg-${renderSeq++}`, def);
-      el.innerHTML = svg;
-      el.querySelectorAll(".node").forEach((nodeEl) => {
-        const id = resolveNodeId(nodeEl);
-        if (!id) return;
-        nodeEl.style.cursor = "pointer";
-        nodeEl.addEventListener("click", () => onSelectNode(id));
-      });
-    } catch (err) {
-      el.textContent = def;
+      let current = def;
+      while (current !== null) {
+        await paint(current);
+        current = pendingDef;
+        pendingDef = null;
+      }
     } finally {
       renderInFlight = false;
     }

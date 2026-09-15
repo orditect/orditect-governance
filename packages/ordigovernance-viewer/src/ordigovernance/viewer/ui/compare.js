@@ -30,22 +30,22 @@ export function initCompare({ api, dom, renderTree, governedTypes, rootId, worke
   const close = () => overlay.classList.add("hidden");
 
   async function fetchRunData(runId) {
-    const [tree, gens, audit, graph, results, validate] =
+    const [tree, gens, audit, graph, validate] =
       await Promise.all([
         api.getTree(runId, rootId),
         api.getGenerations(runId, rootId),
         api.getAudit(runId),
         api.getGraph(runId, rootId),
-        api.getResults(runId),
         api.validate(runId),
       ]);
-    return { tree, gens, audit, graph, results, validate };
+    return { tree, gens, audit, graph, validate };
   }
 
     function summarize(d) {
     const nodeCount = (d.graph.task_ids || []).length;
     // Worker tally is opt-in: the id prefix is business vocabulary,
     // injected by the caller (docs/pitfalls.md 13.18).
+
     const workerCount = workerPrefix
       ? (d.graph.task_ids || [])
           .filter((t) => t.startsWith(workerPrefix)).length

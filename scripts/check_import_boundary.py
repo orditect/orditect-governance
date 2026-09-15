@@ -36,8 +36,8 @@ _IMPORT_RE = re.compile(
     re.MULTILINE,
 )
 
-import sys as _sys
-_STDLIB = set(_sys.stdlib_module_names)
+
+_STDLIB = set(sys.stdlib_module_names)
 
 
 def _top_level(module: str) -> str:

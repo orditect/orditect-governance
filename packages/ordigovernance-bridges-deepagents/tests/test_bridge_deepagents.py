@@ -51,12 +51,12 @@ def test_factory_receives_tracked_model_and_tools(monkeypatch):
     result = build_tracked_agent(
         tracked_llm, FakeTrackedTools(),
         {"search": {"description": "web search"}},
-        instructions="Research carefully.")
+        system_prompt="Research carefully.")
     assert result == "deep-agent"
     assert isinstance(captured["model"], LangChainTrackedLLM)
     assert captured["model"].tracked is tracked_llm
     assert [t.name for t in captured["tools"]] == ["search"]
-    assert captured["kwargs"] == {"instructions": "Research carefully."}
+    assert captured["kwargs"] == {"system_prompt": "Research carefully."}
 
 
 def test_agent_kwargs_pass_through_verbatim(monkeypatch):
@@ -86,5 +86,5 @@ def test_real_factory_signature_smoke():
     agent = build_tracked_agent(
         FakeTrackedLLM(), FakeTrackedTools(),
         {"search": {"description": "web search"}},
-        instructions="Research carefully.")
+        system_prompt="Research carefully.")
     assert agent is not None

@@ -1,7 +1,10 @@
-/* SSE (EventSource) wrapper with auto-reconnect and JSON parsing.
+/* SSE (EventSource) wrapper with JSON parsing.
 
-The source knows nothing about event semantics; consumers register
-onMessage handlers and receive parsed payloads.
+Reconnection is the EventSource built-in: the browser retries the
+connection automatically after a drop (honoring the server's retry
+hint); this wrapper adds no reconnect logic of its own. The source
+knows nothing about event semantics; consumers register onMessage
+handlers and receive parsed payloads.
 */
 
 export function initSse({ url, eventSourceImpl = null } = {}) {

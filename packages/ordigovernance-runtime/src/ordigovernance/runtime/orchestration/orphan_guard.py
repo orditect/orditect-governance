@@ -45,11 +45,20 @@ TERMINAL_WORDS = frozenset({"succeeded", "failed", "cancelled"})
 
 
 class ActiveDescendantsError(RuntimeError):
-    """Reopen blocked: the target still has non-terminal descendants."""
+    """Reopen blocked: the target still has non-terminal descendants.
 
-    def __init__(self, task_id: str, active: list[str]) -> None:
+    pin_consumers carries the advisory diagnostics collected when the
+    guard was invoked with an archive backend wired: active
+    generations that pinned the target's current generation and may
+    already assume its outputs. Advisory only -- warnings never
+    block; active descendants always do.
+    """
+
+    def __init__(self, task_id: str, active: list[str],
+                 pin_consumers: list[dict] | None = None) -> None:
         self.task_id = task_id
         self.active = tuple(active)
+        self.pin_consumers = tuple(pin_consumers or ())
         super().__init__(
             f"reopen of {task_id!r} blocked: active descendants "
             f"{sorted(active)}; settle them first (pause/cancel) or "
@@ -169,15 +178,25 @@ async def assert_no_active_descendants(
 ) -> None:
     """Raise ActiveDescendantsError when the target has active children.
 
-    Additionally returns no warnings API surface: callers that want
-    the pin-consumer advisory should call find_active_pin_consumers
-    themselves (warnings never block a reopen; the backend is only
-    consulted here for symmetry when wired, and its result is
-    attached to the raised error for diagnostics).
+    When an archive backend is wired, the raised error carries the
+    pin-consumer advisory on its pin_consumers attribute (collected
+    best-effort: an advisory read failure never masks the descendant
+    finding itself). Callers that want the advisory without the
+    descendant check should call find_active_pin_consumers
+    themselves.
     """
     active = await find_active_descendants(
         task_id, deps_reader=deps_reader, task_io=task_io,
         terminal_words=terminal_words,
     )
     if active:
-        raise ActiveDescendantsError(task_id, active)
+        pin_consumers: list[dict] = []
+        if backend is not None:
+            try:
+                pin_consumers = await find_active_pin_consumers(
+                    task_id, backend=backend, task_io=task_io,
+                    terminal_words=terminal_words,
+                )
+            except Exception:
+                pin_consumers = []
+        raise ActiveDescendantsError(task_id, active, pin_consumers)

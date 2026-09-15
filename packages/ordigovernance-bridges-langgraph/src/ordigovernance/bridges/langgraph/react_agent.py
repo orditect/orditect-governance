@@ -28,11 +28,14 @@ from ordigovernance.api.atoms import TrackedLLMProtocol, TrackedToolSetProtocol
 from ordigovernance.bridges.langgraph.tracked_llm import LangChainTrackedLLM
 from ordigovernance.bridges.langgraph.tracked_tools import as_langchain_tools
 
-try:  # optional dependency: the react prebuilt lives in langgraph
-    from langgraph.prebuilt import create_react_agent
-except ImportError:  # pragma: no cover - exercised via monkeypatch
-    create_react_agent = None
-
+try:
+    # LangGraph V1.0+: the react prebuilt moved into langchain.agents.
+    from langchain.agents import create_agent as create_react_agent
+except ImportError:
+    try:  # optional dependency: the legacy home of the react prebuilt
+        from langgraph.prebuilt import create_react_agent
+    except ImportError:  # pragma: no cover - exercised via monkeypatch
+        create_react_agent = None
 
 def build_react_agent(tracked_llm: TrackedLLMProtocol,
                       tracked_tools: TrackedToolSetProtocol,
@@ -42,8 +45,15 @@ def build_react_agent(tracked_llm: TrackedLLMProtocol,
 
     tracked_llm / tracked_tools are per-generation atoms (the caller
     binds them from the generation's AgentContext); tool_specs carries
-    the framework-facing tool facts; agent_kwargs pass through to
-    create_react_agent (prompt, name, pre_model_hook, ...).
+    the framework-facing tool facts; agent_kwargs pass through to the
+    installed factory verbatim (prompt, name, pre_model_hook, ...).
+
+    Version drift note: on LangGraph V1+ the factory is
+    langchain.agents.create_agent, which names the system-prompt
+    parameter system_prompt (the legacy langgraph.prebuilt factory
+    calls it prompt). Pass the name your installed version declares;
+    the contract suite's monkeypatched factory pins the passthrough,
+    and a real signature mismatch surfaces at assembly time.
     """
     if create_react_agent is None:
         raise ImportError(

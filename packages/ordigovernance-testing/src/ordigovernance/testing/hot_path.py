@@ -123,17 +123,26 @@ class MemoryTaskStorage:
         return True
 
     async def reopen_task(self, task_id: str) -> None:
-        """Mint a new generation: the previous chain advances."""
+        """Mint a new generation: the previous chain advances.
+
+        Mirrors the production storage semantics: the old status is
+        recorded as previous_status (the engine tier's memo layer
+        reads it for on_resume routing), the stale result is cleared
+        (a reopened record must not serve the previous generation's
+        outputs while the new generation is still pending), and any
+        cancel request is consumed by the reopen.
+        """
         rec = self.records[task_id]
         prevs = list(rec.get("previous_execution_ids", []))
         current = rec.get("execution_id")
         if current:
             prevs.append(current)
         rec["previous_execution_ids"] = prevs
+        rec["previous_status"] = rec.get("status")
         rec["execution_id"] = f"exec-{uuid.uuid4().hex[:12]}"
         rec["status"] = "pending"
         rec.pop("cancel_requested", None)
-
+        rec.pop("result", None)
 
 class MemoryQuota:
     """Admission quota ledger (BudgetLedger's duck-typed surface).

@@ -347,3 +347,118 @@ regexes and event-type names are injected from the app's assembly
 file. The viewer's ui/ components take them as parameters
 (tokenCallers, workerPrefix, governedTypes, formatNodeLabel); nothing
 business-shaped is hardcoded in the reusable layer.
+
+## 14. Bridge bring-up: real-endpoint verification lessons
+
+### 14.1 Probe the bare client contract before any react loop
+GovernedLLMClient lives outside this repository; whether it forwards
+the endpoint-native tools parameter and returns usage is not
+observable from any test here. A missing tools forward fails
+SILENTLY: the model answers in plain text and no error ever
+surfaces. scripts/probe_bridge_env.py runs three layers (bare client
+-> langgraph react loop -> deepagents agent) so a breakage attributes
+to exactly one component instead of surfacing three frames away
+inside a react loop (same class as pitfall 6). Rule: never debug a
+real react loop before layer 1 is green.
+
+### 14.2 Bridge shells must forward every call option, not only messages
+A shell that drops stop sequences or bind-time options
+(parallel_tool_calls, ...) changes model behavior without any error.
+LangChainTrackedLLM merges bind kwargs, tool specs, tool_choice and
+stop into every tracked call; the unbound model never carries them
+(clone discipline). Locked by tests/test_bridge_params.py.
+
+### 14.3 tool_calls survive in whichever shape the middleware left them
+Middleware chains (deepagents) may leave raw OpenAI tool_calls only
+under additional_kwargs["tool_calls"] instead of normalizing into
+.tool_calls. Dropping them makes the next round's history reference
+tool_call_ids the assistant message never declared, and the endpoint
+rejects the request with a 400. _raw_tool_calls reads both shapes;
+already wire-shaped entries pass through untouched. Locked by
+tests/test_bridge_params.py.
+
+### 14.4 Real models require an explicit args_schema per tool
+The passthrough capture schema advertises a single opaque "kwargs"
+object; a real model fills parameters unreliably against it, and
+strict endpoints reject additionalProperties schemas. The passthrough
+schema is for deterministic tests only. Tool payload keys must also
+avoid the reserved plumbing names (name / inputs / reuse /
+record_origin / purpose / seq / params / call_id / content_fn /
+payload_fn): PassthroughTrackedToolSet.call fails loudly with a
+rename instruction instead of surfacing as a TypeError frames away.
+Locked by tests/test_bridge_params.py.
+
+### 14.5 Fakes must mirror reopen semantics: previous_status and a cleared result
+An engine memo layer reads previous_status for on_resume routing; a
+fake that never writes it makes on_resume unreachable in every
+fixture while production behaves differently. A reopened record that
+keeps its old result serves the PREVIOUS generation's outputs while
+the new generation is still pending. MemoryTaskStorage.reopen_task
+writes previous_status and clears result/cancel_requested. Same
+lesson class as pitfall 1: read the framework's real behavior, not
+the minimal surface.
+
+### 14.6 A receipt wait that times out silently is a 300-second misdiagnosis
+QualityGatePattern._wait_receipt used to return silently on timeout;
+the gate then blocked on wait_terminal for a generation that was
+never reopened and reported a step timeout one frame away from the
+cause. Receipt waits raise TimeoutError (matching
+FanOutPattern.wait_resumed and ReplayDriver._wait_reopened).
+
+### 14.7 The shared viewer API client lists only routes that exist
+compare.js fetched /api/runs/{id}/results, a route the trace router
+never shipped, so every compare open 404'd — and the payload was
+never even rendered. Frame discipline for the graph panel: a render
+request arriving while mermaid is busy must coalesce to the latest
+definition, never drop (a dropped frame leaves the DAG one poll
+behind until the next signature change).
+
+## 15. Real-endpoint verification lessons (probe bring-up)
+
+### 15.1 Optional configuration loaders must never skip silently
+The probe treated python-dotenv as optional and skipped .env loading
+silently when the package was absent: a .env sitting at the repo root
+read as zero keys, and the failure message blamed missing variables
+instead of the unloaded file. One full debugging round went into
+"the file is right there, why is it failing". Rule: an expected
+configuration source reports what it did on startup (path, parser,
+key count); optional dependencies degrade to a built-in fallback,
+never to silence. Locked by the startup diagnostic line in
+scripts/probe_bridge_env.py.
+
+### 15.2 Framework factory signatures drift; the smoke test is the lock
+deepagents renamed instructions to system_prompt at 0.7 (no **kwargs
+fallback: a wrong name raises TypeError at assembly time), and
+LangGraph V1 moved create_react_agent into langchain.agents as
+create_agent (prompt renamed system_prompt). Both drifts were caught
+by the real-factory smoke test, not by reading changelogs. The
+three-part lock: (a) test_real_factory_signature_smoke assembles a
+real graph against the installed package; (b) pyproject extras
+floors sit at the renamed version (deepagents>=0.7); (c) dual-import
+tries the new home first. Bridge kwargs pass through verbatim, so
+callers must use the name their installed version declares.
+
+### 15.3 Never hand a raw string to a framework factory's model slot
+create_deep_agent(model=...) accepts str | BaseChatModel. Passing a
+string makes the framework build its own LLM client entirely outside
+the governed plane: no semaphore, no budget, no audit, no call_id
+discipline, and nothing raises — the calls just never appear in the
+evidence chain. The tracked atom is the entire governance surface;
+the model slot only ever receives a LangChainTrackedLLM. Same
+lesson class as 12.2 (the bridge shell IS the governance boundary).
+
+### 15.4 Transitive-dependency warnings are not library bugs
+starlette's testclient module references anyio's deprecated
+BlockingPortal alias at import time; upgrading to the newest
+fastapi/starlette does not remove it (verified present in starlette
+1.6.0 with anyio 4.15.1 — upstream has not migrated). Discipline:
+(a) never declare a transitive dependency in pyproject — fastapi
+pins starlette's range and a second constraint risks an unsolvable
+intersection; (b) upgrade the DIRECT dependency (fastapi), which
+manages the transitive range — upgrading starlette alone stops at
+fastapi's ceiling; (c) silence with a filterwarnings entry pinned to
+the exact message + module so every other warning stays visible, and
+record the verified versions in the comment for later removal.
+Related micro-lesson: check versions with importlib.metadata.version
+or pip show — several packages (anyio) expose no __version__
+attribute.

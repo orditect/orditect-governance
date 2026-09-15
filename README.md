@@ -153,6 +153,35 @@ lifecycle, streams, replay mechanics with a spy drift engine),
 viewer (trace endpoints, quickstart smoke), testing (golden,
 conformance), bridges (format translation).
 
+### Verifying against a real endpoint
+
+The suites are hermetic: mock tool handlers, scripted models,
+in-memory hot path. To verify the bridges against a real
+OpenAI-compatible endpoint, use the layered probe:
+
+    cp .env.example .env
+    # fill OPENAI_BASE_URL / OPENAI_API_KEY
+    # (OPENAI_API_BASE is accepted as an alias)
+
+    PROBE_LAYER=1   python scripts/probe_bridge_env.py
+    # bare GovernedLLMClient: tools forwarding, usage billing
+
+    PROBE_LAYER=all python scripts/probe_bridge_env.py
+    # + layer 2: langgraph react loop through GovernedAgent
+    # + layer 3: deepagents agent (requires the deepagents extra)
+
+Layers 2/3 drive a real react loop: the audit stream must show the
+governed tool call id (`search-<task>-<eid>-1001`), per-call token
+usage on every llm_call event, and the archive save
+(`memsave-...-90`). Deepagents note: expect llm_call token counts
+roughly an order of magnitude above langgraph's — the middleware
+system prompt is billed too, and the audit stream is exactly where
+that cost becomes visible.
+
+Framework compatibility: langgraph V1+ (factory at
+langchain.agents.create_agent) and legacy langgraph are both
+supported; deepagents >= 0.7 is required (the system_prompt era).
+
 ## Engine plug-in points
 
 The open runtime ships passthrough defaults; engines implement the
