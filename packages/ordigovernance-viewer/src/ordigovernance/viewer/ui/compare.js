@@ -45,7 +45,7 @@ export function initCompare({ api, dom, renderTree, governedTypes, rootId, worke
     function summarize(d) {
     const nodeCount = (d.graph.task_ids || []).length;
     // Worker tally is opt-in: the id prefix is business vocabulary,
-    // injected by the caller (README pitfall 6.1).
+    // injected by the caller (docs/pitfalls.md 13.18).
     const workerCount = workerPrefix
       ? (d.graph.task_ids || [])
           .filter((t) => t.startsWith(workerPrefix)).length

@@ -171,6 +171,26 @@ engine tier's suite locks the semantics of real implementations.
 Together they cover the full chain without either side importing the
 other.
 
+## Tier map (orditect-components -> tiers)
+
+The legacy monorepo `orditect-components` was split into this open
+stack plus a closed engine tier. Where each old surface landed:
+
+| old surface | open tier | engine tier |
+|---|---|---|
+| naming discipline, store/task/llm protocols, policy vocabulary | `ordigovernance-api` | built on it |
+| governed agents/tools, archive, pins, lifecycle, patterns, streams | `ordigovernance-runtime` | built on it |
+| replay mechanics (submit/reopen/baselines/evidence assembly) | `ordigovernance-runtime` | — |
+| memo layer (cross-generation reuse), PolicyResolver, drift attribution | protocols only (`MemoLayerProtocol`, `PolicyResolverProtocol`) | implementations |
+| `@governed_interval` / `IntervalBinder` (decorator-first assembly) | — | ✓ |
+| nested intervals (multi-agent, namespace isolation) | — | ✓ |
+| golden / conformance kit, deterministic mocks, hot-path fixtures | `ordigovernance-testing` | shared (both tiers run it) |
+| viewer routers + dashboard | `ordigovernance-viewer` | — |
+
+The last two rows are deliberate DX differentiators, not engine
+intelligence; everything the open tier ships is functionally complete
+for governed runs, replay mechanics and evidence inspection.
+
 ## Replay mechanics
 
 `ReplayDriver` reruns nodes or DAG intervals over pinned inputs:
@@ -182,6 +202,8 @@ snapshot bundle, never from shared hot records.
 
 ## Documentation
 
+- [docs/design-goals.md](docs/design-goals.md) — design goals,
+  invariants and extension discipline for external contributors.
 - [docs/pitfalls.md](docs/pitfalls.md) — hard-won lessons from
   bringing up the real-executor acceptance ground (fake contract
   surfaces, resource/semaphore name alignment, retry_scope

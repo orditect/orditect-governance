@@ -1,4 +1,3 @@
-#!/usr/bin/env python
 """Import boundary gate: machine-enforced layering for the ordigovernance repo.
 
 Rules (each is checked by scanning source files for import statements):
@@ -7,7 +6,8 @@ Rules (each is checked by scanning source files for import statements):
      (`orditect_components`) or any configured closed-tier package.
   2. `ordigovernance-api` must stay stdlib-only: every non-stdlib top-level
      import inside it is a violation.
-  3. `ordigovernance-testing` may only import stdlib plus `ordigovernance.*`.
+  3. `ordigovernance-testing` may only import stdlib, `ordigovernance.*`
+     and `orditect.*` (its hot-path fixtures wrap the framework).
   4. No packaged code may import `examples` (examples import packages,
      never the other way around).
 
@@ -86,7 +86,8 @@ def check() -> list[str]:
                     and top not in _STDLIB \
                     and not _is_internal_api_import(module):
                 # api stays free of EXTERNAL third-party deps; only its
-                # own subpackage imports are internal.
+                # own subpackage imports are in
+                # ternal.
                 findings.append(
                     f"{rel}: ordigovernance-api must stay free of external "
                     f"dependencies (found {module!r})")

@@ -8,8 +8,8 @@ they keep executing, their outputs keep landing, and the parent may
 already have consumed (or be about to consume) archive reads of a
 world the children are still mutating. Today the safety comes from
 workflow timing conventions (drivers wait for fan-out terminals
-before reopening) — the same shape as README pitfalls 1.4/1.6, which
-were conventions until they bit.
+before reopening) — the same shape as docs/pitfalls.md 13.2/13.7,
+which were conventions until they bit.
 
 This guard turns the convention into a mechanism: before reopening,
 detect ACTIVE descendants (dependency-graph reachables whose hot
@@ -25,7 +25,7 @@ generation-precise), but the consumer's world view may already assume
 the old generation's outputs. Warnings never block; active
 descendants always do.
 
-Boundary disclosure (README pitfall 1.1): dependency edges are the
+Boundary disclosure (docs/pitfalls.md 13.1): dependency edges are the
 DECLARED structure; snapshot parentage is the EXECUTED structure. This
 guard deliberately reads the declared graph only — a descendant known
 only through snapshots (never edge-written) is outside its view. The

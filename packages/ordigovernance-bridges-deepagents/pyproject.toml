@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ordigovernance-bridges-deepagents"
 version = "0.1.0"
-description = "DeepAgents bridge: thin shells over ordigovernance tracked atoms (skeleton pending API confirmation)"
+description = "DeepAgents bridge: thin shells over ordigovernance tracked atoms"
 requires-python = ">=3.12"
 license = { text = "SUL-1.0" }
 dependencies = [

@@ -1,29 +1,31 @@
-
 """build_tracked_agent: assemble a deepagents agent over tracked atoms.
 
-Status: SKELETON. The deepagents package API surface is not pinned by
-this project's environment yet; the assembly contract IS pinned:
+Same shape as the LangGraph bridge (both ecosystems speak LangChain
+messages): the model is a tracked chat model, business tools are
+tracked, and the framework's agent loop runs INSIDE one task
+interval — its iterations governed at call level, its boundary at
+task level.
 
-  1. The agent's LLM is a tracked chat model (LangChainTrackedLLM —
-     deepagents speaks LangChain messages, the langgraph bridge shell
-     is reused verbatim).
-  2. The agent's tools are tracked (as_langchain_tools).
-  3. The agent loop runs INSIDE one task interval; its iterations are
-     governed at call level, its boundary at task level.
-
-Until the deepagents dependency is installed and its factory signature
-confirmed, this module exposes the wiring plan as code and raises at
-construction time.
+Governance disclosure: only model calls and the tools passed via
+tool_specs flow through the governed plane. DeepAgents' internal
+middleware vocabulary (planning notes, the virtual filesystem,
+subagent spawning) executes ungoverned inside the interval; a
+subagent whose model is itself a LangChainTrackedLLM shares the
+governed model path.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from ordigovernance.api.atoms import TrackedLLMProtocol, TrackedToolSetProtocol
 from ordigovernance.bridges.langgraph.tracked_llm import LangChainTrackedLLM
 from ordigovernance.bridges.langgraph.tracked_tools import as_langchain_tools
-from ordigovernance.api.atoms import TrackedLLMProtocol
-from ordigovernance.api.atoms import TrackedToolSetProtocol
+
+try:
+    from deepagents import create_deep_agent
+except ImportError:  # pragma: no cover - exercised via monkeypatch
+    create_deep_agent = None
 
 
 def build_tracked_agent(tracked_llm: TrackedLLMProtocol,
@@ -34,22 +36,15 @@ def build_tracked_agent(tracked_llm: TrackedLLMProtocol,
 
     tool_specs: {name: {"description": str, "args_schema": ...}} — the
     framework-facing tool facts; handlers live behind tracked_tools.
+    agent_kwargs (instructions, subagents, ...) pass through to
+    create_deep_agent verbatim; the two tracked objects above are the
+    entire governance surface.
     """
-    try:
-        import deepagents  # noqa: F401
-    except ImportError:
+    if create_deep_agent is None:
         raise ImportError(
             "bridges.deepagents requires the deepagents package: "
             "pip install ordigovernance-bridges-deepagents[deepagents]"
-        ) from None
-
+        )
     model = LangChainTrackedLLM(tracked=tracked_llm)
     tools = as_langchain_tools(tracked_tools, tool_specs)
-    # TODO: pin the deepagents factory call once its API is confirmed
-    # against the installed version. The two tracked objects above are
-    # the entire governance surface; everything else is framework
-    # vocabulary.
-    raise NotImplementedError(
-        "deepagents factory wiring pending API confirmation; "
-        "tracked model and tools are ready"
-    )
+    return create_deep_agent(model=model, tools=tools, **agent_kwargs)

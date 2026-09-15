@@ -67,14 +67,24 @@ class RunsRegistry:
     def update_budget_scope(self, run_id: str, budget_scope: str) -> None:
         """Backfill the effective budget/memo scope for one run.
 
-        The executor derives the run-scoped marker (see README pitfall
-        4.2); the registry entry is the replay channel's only source
-        for the ORIGINAL run's memo scope, so it must be updated once
-        the executor knows it.
+        The executor derives the run-scoped marker (see
+        docs/pitfalls.md 12.1); the registry entry is the replay
+        channel's only source for the ORIGINAL run's memo scope, so it
+        must be updated once the executor knows it.
+
+        Write-once: only an entry still holding its placeholder (the
+        run_id itself) is backfilled. The registry is shared mutable
+        state across interleaved runs (app + CLI on one hot path); an
+        unconditional overwrite lets a LATER run's derivation land on
+        an EARLIER run's entry, and every replay against the earlier
+        run then derives a memo scope it never used (all keys miss).
+        Prefer per-run evidence (a run_meta.json inside the trace
+        bundle) when wiring new replay channels.
         """
         entries = self._load_index()
         for e in entries:
-            if e.get("run_id") == run_id:
+            if (e.get("run_id") == run_id
+                    and e.get("budget_scope") == run_id):
                 e["budget_scope"] = budget_scope
                 break
         self._save_index(entries)

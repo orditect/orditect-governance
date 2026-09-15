@@ -13,9 +13,12 @@ Schema discipline:
     verbatim.
   - WITHOUT one, langchain would infer a schema from the coroutine
     signature and swallow extra keys (pydantic v2 drops undeclared
-    fields at validation). A single-payload capture model is used
-    instead: the framework hands the WHOLE tool-input dict over as one
-    value, which is then unpacked into the tracked call.
+    fields at validation). A single-payload capture model with
+    extra="allow" is used instead, and the invocation MERGES the
+    capture field with any extra top-level fields: ToolNode hands the
+    model's args dict straight in ({"query": ...}), while legacy
+    callers may nest the whole payload under "kwargs" — both land
+    identically on the tracked call.
 """
 
 from __future__ import annotations
@@ -23,7 +26,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.tools import StructuredTool
-from pydantic import BaseModel, create_model
+from pydantic import BaseModel, ConfigDict, create_model
 
 from ordigovernance.api.atoms import TrackedToolSetProtocol
 
@@ -31,10 +34,11 @@ _PAYLOAD_FIELD = "kwargs"
 
 
 def _passthrough_schema(name: str) -> type[BaseModel]:
-    """Single-dict capture model: the whole tool input as one value."""
+    """Capture model: the whole tool input, direct or nested under "kwargs"."""
     return create_model(
         f"{name.title().replace('_', '')}Args",
-        **{_PAYLOAD_FIELD: (dict, ...)},
+        __config__=ConfigDict(extra="allow"),
+        **{_PAYLOAD_FIELD: (dict, {})},
     )
 
 
@@ -57,7 +61,8 @@ def as_langchain_tools(tracked: TrackedToolSetProtocol,
             schema = explicit_schema
         else:
             async def _invoke(_name=name, **kwargs: Any) -> Any:
-                payload = kwargs.get(_PAYLOAD_FIELD, kwargs)
+                nested = kwargs.pop(_PAYLOAD_FIELD, None) or {}
+                payload = {**kwargs, **nested}
                 return await tracked.call(
                     _name, inputs=dict(payload), **dict(payload))
             schema = _passthrough_schema(name)

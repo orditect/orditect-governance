@@ -16,6 +16,7 @@ SUITES=(
     "packages/ordigovernance-viewer/tests"
     "packages/ordigovernance-testing/tests"
     "packages/ordigovernance-bridges-langgraph/tests"
+    "packages/ordigovernance-bridges-deepagents/tests"
     "packages/ordigovernance-bridges-direct/tests"
 )
 

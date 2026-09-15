@@ -150,3 +150,200 @@ the NEXT run's cleanup silently deletes the PREVIOUS run's bundle
 before any diff — the diff then reads an empty directory and reports
 phantom "0 != 45" divergences. Rule: trace_dir = mkdtemp()/"trace".
 Locked by examples/acceptance/selfcheck.py.
+
+## 12. Split-specific lessons (orditect-components -> tiers)
+
+### 12.1 Registry backfills over shared state are write-once
+`RunsRegistry.update_budget_scope` must only backfill entries still
+holding their placeholder (the run_id). The registry is shared
+mutable state across interleaved runs (app + CLI on one hot path);
+an unconditional overwrite lets a later run's scope derivation land
+on an earlier run's entry, and every replay against the earlier run
+then derives a memo scope it never used. This is the same lesson
+class as 10.1/10.3: prefer per-run evidence over shared mutable
+state, and guard every write-back. Locked by
+tests/test_run_registry_scope.py.
+
+### 12.2 LangChain shells must translate tool_calls in BOTH directions
+ToolNode dispatches on LangChain ToolCall dicts ({name, args, id});
+OpenAI endpoints require assistant history entries in the wire shape
+({"function": {...}} plus tool messages with tool_call_id).
+Translating only the human/system/ai text path breaks every real
+react loop: the first round works, the second round's history is
+malformed. The bridge's `_to_dicts` / `_to_ai_message` pair covers
+both directions; `bind_tools` forwards specs as the endpoint-native
+tools parameter on every tracked call. Locked by
+tests/test_bridge_contract.py.
+
+### 12.3 The passthrough tool schema must accept ToolNode's arg shape
+A single-payload capture model requiring a "kwargs" field rejects the
+way ToolNode invokes tools (the model's args dict passed directly).
+The capture model carries extra="allow" and the invocation merges
+top-level fields with the nested payload, so both call shapes land
+identically on the tracked call. Same lesson class as the parent
+project's "langchain swallows extra kwargs" pitfall — the schema is
+a translation surface, not a validation surface.
+
+### 12.4 ToolCall normalization is langchain-version-visible
+langchain-core normalizes ToolCall dicts on AIMessage construction
+(adding an explicit type field in newer releases). Emit the canonical
+shape (with "type": "tool_call") from the translator instead of a
+minimal dict, or round-trip assertions drift across langchain
+versions.
+
+## 13. Inherited lessons (components pitfalls + framework field notes)
+
+Condensed from the orditect-components pitfall log and the orditect
+framework's field notes, so users of this stack never need to
+cross-read either. The parenthesized refs point at the source
+documents for archaeology only.
+
+### 13.1 Supervisor nodes must be real executor-managed nodes
+(components 1.1/1.2) Dependency edges (declared structure) and
+snapshot lineage (executed structure) are two projections; the
+contextvar parent injection follows the EXECUTING node, not the
+declared edge. A fan-out supervisor run inline inside another node's
+execute() flattens the lineage tree, has zero snapshots and no
+archive, and breaks fan-out replay and HITL retry on it. Hand-forging
+its hot record (initialize + status write) masks the problem and
+violates the lifecycle: hot records are written by the executor only.
+Rule: every grouping node is a real submitted node.
+
+### 13.2 Quality-gate reopen iterations never rebuild the producer
+(components 1.6) Iteration >= 2 of QualityGatePattern goes through
+sink.retry_scope, which REOPENS the existing record and re-executes
+the SAME instance; build_producer / build_judge are invoked only on
+iteration 1. Values captured in the build closure never reach the
+reopened generation — feedback between rounds must travel through
+the hot record or the archive (the acceptance ReviewImpl/WriterImpl
+shape). Locked by test_quality_gate.py.
+
+### 13.3 Derive round markers from the UPSTREAM hot record
+(components 1.7) A judge's "which round am I judging" marker reads
+the producer's previous_execution_ids (producer gen N settles before
+judge gen N runs). Never derive it from the judge's own record: on a
+resume its own prevs lag the producer's.
+
+### 13.4 build_task runs BEFORE submit: no hot record, no eid at build time
+(components 4.7/4.9) ReplayDriver._drive invokes build_task before
+orchestrator.submit; the hot record (and therefore the eid) does not
+exist yet. Anything reading hot.records[local_id] during construction
+gets a KeyError or an empty dict. Logic needing the generation
+identity lives in execute() (ctx.meta carries the eid); build_task
+only returns the task shell. Async build_task callbacks are awaited
+by the driver — fakes must mirror both timings.
+
+### 13.5 Clean deterministic task ids from PREVIOUS runs' snapshots
+(components 2.1, framework App.E.2) Deterministic ids +
+if_not_exists=True silently reuse stale hot records from an
+interrupted earlier run: no executor lifecycle, no snapshots, no
+audit, and downstream consumes last run's results (run_rules reports
+DR-DEP-001). The cleanup list is built from FACTS: compile-time-known
+ids plus every task_id in PREVIOUS runs' snapshots.ndjson
+(collect_known_task_ids). The current run's snapshot file does not
+exist yet — scanning only it cleans nothing.
+
+### 13.6 Expose HITL resources before driving; clear them at teardown
+(components 3.1/3.2) Pause/resume must work DURING the run: hand
+resources to the manager via the on_resources_ready hook, never by
+assigning after the executor returns (every mid-run HITL call then
+sees "no active run"). Clear them in finally — a stale reference
+sends the next run's actions into a dead dispatcher queue: actions
+are accepted, receipts never arrive. SingleRunManager implements both;
+custom drivers must replicate them.
+
+### 13.7 Receipts are dual and run-scoped; recover failed before blocking on cancelled
+(components 3.3/1.4, framework App.E.3) The sink returns an
+ACCEPTANCE receipt; the EXECUTION receipt is polled and 404 means
+pending. The action queue is torn down when the run ends: a resume
+issued after the run finishes is silently dropped. When a paused
+child must be revived, the driver waits for SUCCESS, not for any
+terminal state. And recover FAILED children (automatic path) before
+blocking on cancelled ones (human path): pausing one child must not
+freeze its siblings' recovery.
+
+### 13.8 Recovery rebuilds from task_id alone: single construction source
+(components 5.1/5.2, framework pitfall 3) RecoveryService's
+task_factory cannot see the driver's constructor closures. Build
+instances IDENTICALLY in the factory and in first-submission closures;
+anything the factory cannot reconstruct from the task_id must be
+fetchable at rebuild time — shared holder dicts filled at run start
+(the acceptance app's holder pattern), never values captured before
+the run context exists. A missing piece raises a loud KeyError.
+
+### 13.9 REUSE vs RERUN is decided against the hot record's result
+(framework App.E.4) Resume reuses a node only when its latest
+generation is in reuse_terminal_words AND the hot record carries a
+result; the result lands after execute() returns. A resume issued
+while a sibling is mid-execution (inside a cooperative delay) RERUNS
+it even though its expensive calls already succeeded and were billed.
+Scope revivals narrowly (retry_scope the paused node) or accept the
+rerun as correct semantics.
+
+### 13.10 Cancel-token handlers must return envelopes, never bare None
+(components pitfall 9, framework behavior boundary 1) The framework's
+cancelled verdict is `result is None and token.is_cancelled()`: a
+handler legitimately returning None while the token flips is
+mislabeled cancelled. memory_read-style handlers return
+{"key": ..., "value": None} envelopes. Applies to every custom
+MemoBackend and tool handler.
+
+### 13.11 Budget is post-charge; a blocked call leaves no audit row
+(framework behavior boundaries 2/6) check() blocks when balance <= 0,
+so the last call overspends honestly and every subsequent call blocks
+BEFORE acquiring a slot — and writes NO audit event (it never reached
+the resource). Never reconcile spend from missing rows. Stub routing
+decisions bypass the call plane by the same design and must write
+audit directly (GovernedToolSet.record_stub_decision is the
+reference).
+
+### 13.12 snapshot_sink is the observability master switch
+(framework field note 2.9) An orchestrator built without
+snapshot_sink writes ZERO snapshots with no error raised; every
+viewer, validate and recovery read sees nothing. build_run_context
+wires ProtocolSnapshotSink(store.snapshot); custom assembly must do
+the same.
+
+### 13.13 Same-resource nesting is exempt: distinct names for real contention
+(framework field note 2.2) A child whose resource_type matches an
+ancestor's inherits the ancestor's semaphore slot (lineage exemption,
+the no-self-deadlock mechanism): no real contention occurs. To make
+workers actually queue, register and use DISTINCT resource names
+(root on task_execution, workers on worker_exec). Registration before
+first acquire stays mandatory (pitfall 2).
+
+### 13.14 Single-active-run guards are process-local
+(components 10.4) SingleRunManager serializes runs INSIDE one
+process. A second process (a CLI) sharing the same redis hot path and
+registry races the first: both sides' cleanup passes delete each
+other's records and both snapshot sinks mix generations. Multi-process
+drivers check the registry for status == "running" entries before
+starting, with an explicit force flag for stale entries left by a
+crashed run.
+
+### 13.15 Every process writing memo/archive traffic configures persistence
+(components 10.2) The mock memory body is process-local until
+configure_memory_body(path) is called; a process that never calls it
+loses every memo entry and gen-result archive at exit, and replays
+against its runs see an empty store. Every entry point (app, CLI,
+drivers) configures the body before driving.
+
+### 13.16 On an unexpected verdict, diff the archived results first
+(components 10.6) The cheapest first move on any non-identical drift
+verdict is to dump both generations' archived results and diff them
+field by field; the differing field names the mechanism (provenance,
+missing baseline, cross-run contamination) faster than reading any
+code path.
+
+### 13.17 "no snapshot" is a symptom, never filter it away
+(components 6.2) A graph node without snapshots signals a stale hot
+record (13.5) or an inline-degraded supervisor (13.1). Rendering it
+as "no snapshot" keeps the bug visible; filtering such nodes out of
+the graph hides it.
+
+### 13.18 UI components carry zero business vocabulary
+(components 6.1) Task-id prefixes, root ids, token-attribution
+regexes and event-type names are injected from the app's assembly
+file. The viewer's ui/ components take them as parameters
+(tokenCallers, workerPrefix, governedTypes, formatNodeLabel); nothing
+business-shaped is hardcoded in the reusable layer.
