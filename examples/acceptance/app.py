@@ -389,11 +389,13 @@ async def execute_acceptance_run(
         await orch.submit(
             make_agent(RESEARCHERS[0],
                        ResearcherImpl(RESEARCHERS[0], hot["storage"])),
-            task_id=RESEARCHERS[0])
+            task_id=RESEARCHERS[0],
+            parent_task_id=ROOT_ID)
         reopened = await _wait_new_generation(
             hot["storage"], RESEARCHERS[0], r1_gen1, timeout=60.0)
         if reopened["status"] != "succeeded":
             raise RuntimeError(
+
                 f"reopened researcher failed: {reopened['status']}")
 
         await orch.submit(make_agent(PUBLISH_ID,

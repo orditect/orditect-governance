@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ordigovernance-gateway"
+version = "0.1.0"
+description = "HTTP execution front of the ordigovernance hot path (n8n bridge gateway)"
+requires-python = ">=3.12"
+license = { text = "SUL-1.0" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.0",
+    "ordigovernance-runtime>=0.1.0",
+    "ordigovernance-bridges-direct>=0.1.0",
+]
+
+[project.optional-dependencies]
+memory = ["ordigovernance-testing>=0.1.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+    "ordigovernance-testing>=0.1.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+namespaces = true
+
+[tool.setuptools.package-data]
+"ordigovernance.gateway" = ["py.typed"]

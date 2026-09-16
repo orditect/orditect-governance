@@ -60,6 +60,20 @@ threshold 80, budget 100000 tokens. The review score is parsed from
 the model's final line (SCORE: <0-100>); a missing or malformed
 score fails loudly rather than fabricating convergence.
 
+### Real Redis hot path (Batch 1)
+
+Same narrative over the production storage/governor/quota instead of
+the in-memory fakes (docs/pitfalls.md 1: the fakes only approximate
+the Lua state machine, lease tokens and quota enforcement):
+
+    docker run -d -p 6379:6379 redis:7
+    python -m examples.acceptance.real_app --redis redis://localhost:6379/0
+
+Watch the run log for the per-node hot-record lines: every reopened
+node (researcher-1, researcher-2, writer/review iterations) must carry
+its full previous_execution_ids chain back from the REAL Redis
+storage, and the budget is clean by construction via a per-run scope.
+
 ## Pitfalls
 
 See [docs/pitfalls.md](docs/pitfalls.md) before extending the

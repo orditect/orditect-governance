@@ -39,6 +39,7 @@ import logging
 import os
 import re
 import shutil
+import uuid
 from pathlib import Path
 
 from examples.acceptance.app import (
@@ -57,6 +58,7 @@ from examples.acceptance.app import (
     _wait_receipt,
 )
 from ordigovernance.runtime.agent.governed_agent import GovernedAgent
+from ordigovernance.runtime.lifecycle.cleanup import collect_known_task_ids
 from ordigovernance.runtime.lifecycle.run_context import (
     build_run_context,
     teardown_run_context,
@@ -134,6 +136,81 @@ def _parse_score(review_text: str) -> int:
     return max(0, min(100, int(matches[-1])))
 
 
+# Semaphore table shared by both hot paths; must match the memory
+# variant in app.py (docs/pitfalls.md 2: one namespace for registered
+# resources and semaphore names).
+_ACCEPTANCE_SEMAPHORES = {
+    "task_execution": 8,
+    "llm_research": 2,
+    "llm_writing": 1,
+    "web_search": 2,
+    "memo_store": 2,
+}
+
+# Deterministic task ids of this narrative: the static part of the
+# stale-state cleanup list (docs/pitfalls.md 13.5).
+_STATIC_TASK_IDS = frozenset(
+    {ROOT_ID, WRITER_ID, REVIEW_ID, PUBLISH_ID, *RESEARCHERS})
+
+
+async def _build_redis_hot_path(redis_url: str) -> dict:
+    """Real Redis hot path via the direct bridge (Batch 1).
+
+    Returns {storage, governor, quota, redis_client, registry}: the
+    production implementations whose semantics the in-memory fakes
+    only approximate (docs/pitfalls.md 1). lease_time covers the
+    longest plausible real-endpoint call so a lease never expires
+    mid-call and double-admits a waiter.
+    """
+    from ordigovernance.bridges.direct.context import build_hot_path
+
+    return await build_hot_path(
+        redis_url, semaphores=dict(_ACCEPTANCE_SEMAPHORES),
+        lease_time=300.0)
+
+
+async def _reset_stale_state(hot: dict, task_ids) -> None:
+    """Delete stale hot records left by previous runs (pitfalls 13.5).
+
+    Deterministic task ids plus if_not_exists submission silently reuse
+    whatever an earlier run left in the shared Redis hot path; deletion
+    is by explicit key name, never by pattern.
+    """
+    from ordigovernance.runtime.lifecycle.cleanup import CleanupService
+
+    client = hot.get("redis_client")
+    if client is not None:
+        await CleanupService().reset_task_state(client, task_ids)
+
+
+async def _close_hot_path(hot: dict) -> None:
+    """Release the Redis connection when the hot path owns one."""
+    client = hot.get("redis_client")
+    if client is not None:
+        try:
+            await client.aclose()
+        except Exception:
+            pass
+
+
+async def _log_generation_chains(hot: dict) -> None:
+    """Batch 1 evidence: the persisted generation chain per node.
+
+    Reads the hot records back from the REAL Redis storage after the
+    run: every reopened node must carry its full previous_execution_ids
+    chain, proving reopen semantics survived the Lua state machine
+    (the fake only approximates it in-process).
+    """
+    storage = hot["storage"]
+    for tid in sorted(_STATIC_TASK_IDS):
+        record = await storage.get_task(tid)
+        if not record:
+            continue
+        prevs = record.get("previous_execution_ids") or []
+        log.info("hot record %-16s status=%-9s eid=%s prevs=%d",
+                 tid, record.get("status"),
+                 record.get("execution_id"), len(prevs))
+
 class RealReviewImpl:
     """Score the writer's current draft with a real model review.
 
@@ -172,13 +249,26 @@ async def execute_real_acceptance_run(
         threshold: int = 80,
         max_iterations: int = 3,
         budget_max_units: int = 100000,
+        redis_url: str | None = None,
+        stale_task_ids=(),
         memo_layer_factory=None,
         resolver_factory=None) -> dict:
     """Drive the full narrative over a real endpoint; returns the
-    publish terminal record."""
+    publish terminal record.
+
+    redis_url: when set, the run executes over the REAL Redis hot path
+    (storage / governor / quota via the direct bridge) instead of the
+    in-memory testing fakes -- the Batch 1 verification dimension.
+    stale_task_ids: deterministic ids deleted from the shared Redis
+    state before driving (docs/pitfalls.md 13.5); ignored on the
+    memory path.
+    """
     from ordigovernance.bridges.direct.llms import build_client_registry
 
-    hot = _build_hot_path()
+    if redis_url:
+        hot = await _build_redis_hot_path(redis_url)
+    else:
+        hot = _build_hot_path()
     holder: dict = {}
 
     def make_tools(task_id: str) -> GovernedToolSet:
@@ -235,10 +325,17 @@ async def execute_real_acceptance_run(
         raise KeyError(f"unknown task_id {task_id}")
 
     mock_tools.memory_reset()
+    if redis_url and stale_task_ids:
+        await _reset_stale_state(hot, stale_task_ids)
+    # A fixed budget scope would collide with the previous run's leases
+    # on a shared Redis quota ledger; derive a fresh scope per run so
+    # the budget is clean by construction.
+    budget_scope = (f"acceptance-real:{uuid.uuid4().hex[:8]}"
+                    if redis_url else "acceptance-real:run")
     resources = await build_run_context(
         hot,
         trace_dir=trace_dir,
-        budget_scope="acceptance-real:run",
+        budget_scope=budget_scope,
         budget_max_units=budget_max_units,
         task_factory=task_factory,
     )
@@ -320,13 +417,19 @@ async def execute_real_acceptance_run(
                 f"threshold={threshold})")
 
         # Second-generation beat: direct reopen + resubmit of researcher-1.
+        # orditect (schedule-only submit, v0.1.8+): a PENDING existing
+        # record is scheduled WITHOUT re-initialization, so the generation
+        # chain reopen_task advanced is preserved. Do NOT pass
+        # if_not_exists=True here: it skips the ENTIRE submission
+        # (docs/pitfalls.md 5) and the reopened generation never executes.
         r1_gen1 = (await hot["storage"].get_task(RESEARCHERS[0]))[
             "execution_id"]
         await hot["storage"].reopen_task(RESEARCHERS[0])
         await orch.submit(
             make_agent(RESEARCHERS[0],
                        ResearcherImpl(RESEARCHERS[0], hot["storage"])),
-            task_id=RESEARCHERS[0])
+            task_id=RESEARCHERS[0],
+            parent_task_id=ROOT_ID)
         reopened = await _wait_new_generation(
             hot["storage"], RESEARCHERS[0], r1_gen1, timeout=300.0)
         if reopened["status"] != "succeeded":
@@ -338,9 +441,12 @@ async def execute_real_acceptance_run(
                           task_id=PUBLISH_ID, parent_task_id=ROOT_ID)
         record = await orch.wait_terminal(PUBLISH_ID, timeout=300.0)
         log.info("publish settled: %s", record["status"])
+        if redis_url:
+            await _log_generation_chains(hot)
         return record
     finally:
         await teardown_run_context(resources)
+        await _close_hot_path(hot)
 
 
 def _print_evidence_summary(trace_dir: Path) -> None:
@@ -391,6 +497,12 @@ def main() -> int:
                         help="budget cap in token units")
     parser.add_argument("--trace-dir",
                         default="data/acceptance-real/trace")
+    parser.add_argument("--redis",
+                        default=os.environ.get("REDIS_URL"),
+                        metavar="URL",
+                        help="run over the real Redis hot path, e.g. "
+                             "redis://localhost:6379/0 (default: "
+                             "in-memory fakes); also read from REDIS_URL")
     args = parser.parse_args()
 
     base_url = (os.environ.get("OPENAI_BASE_URL")
@@ -402,18 +514,27 @@ def main() -> int:
         return 2
 
     trace_dir = Path(args.trace_dir)
+    # Collect stale ids from the PREVIOUS bundle before wiping it
+    # (docs/pitfalls.md 13.5): the previous run's snapshots are the
+    # only fact source for dynamically created ids; the current run's
+    # snapshot file does not exist yet.
+    stale_ids = collect_known_task_ids(
+        lambda: [trace_dir / "snapshots.ndjson"], _STATIC_TASK_IDS)
     shutil.rmtree(trace_dir.parent, ignore_errors=True)
+    log.info("hot path: %s",
+             f"redis ({args.redis})" if args.redis
+             else "in-memory fakes")
     record = asyncio.run(execute_real_acceptance_run(
         trace_dir,
         base_url=base_url, api_key=api_key, model=args.model,
         threshold=args.threshold, max_iterations=args.max_iterations,
         budget_max_units=args.budget,
+        redis_url=args.redis, stale_task_ids=stale_ids,
     ))
     print(f"publish settled: {record['status']}")
     print(f"trace bundle: {trace_dir}")
     _print_evidence_summary(trace_dir)
     return 0 if record["status"] == "succeeded" else 1
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

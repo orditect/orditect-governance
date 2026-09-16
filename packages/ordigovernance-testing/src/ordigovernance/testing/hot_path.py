@@ -78,16 +78,28 @@ class MemoryTaskStorage:
             if_not_exists: bool = False,
             **fields,
     ) -> bool:
-        """Create the hot record; returns True when actually created."""
+        """Create the hot record; returns True when actually created.
+
+        Mirrors the production TaskRedisDB semantics EXACTLY:
+        if_not_exists=False re-initializes an existing record
+        unconditionally, minting a new execution_id and RESETTING the
+        previous_execution_ids chain (explicit reset path).
+        if_not_exists=True skips an existing record entirely.
+
+        Note: this is the STORAGE-layer contract. The orchestrator's
+        submit() has its own schedule-only diversion (orditect v0.1.8+):
+        a PENDING existing record is scheduled WITHOUT calling this
+        re-initialization path, so reopen_task chains survive resubmits.
+        """
         if if_not_exists and task_id in self.records:
             return False
-        rec = self.records.setdefault(task_id, {})
-        rec.setdefault("previous_execution_ids", [])
+        rec: dict = {"previous_execution_ids": []}
         rec["status"] = initial_status
         if parent_task_id is not None:
             rec["parent_task_id"] = parent_task_id
         rec.update(fields)
-        rec.setdefault("execution_id", f"exec-{uuid.uuid4().hex[:12]}")
+        rec["execution_id"] = f"exec-{uuid.uuid4().hex[:12]}"
+        self.records[task_id] = rec
         return True
 
     async def create_task(self, task_id: str, **fields) -> None:
@@ -125,20 +137,28 @@ class MemoryTaskStorage:
     async def reopen_task(self, task_id: str) -> None:
         """Mint a new generation: the previous chain advances.
 
-        Mirrors the production storage semantics: the old status is
-        recorded as previous_status (the engine tier's memo layer
-        reads it for on_resume routing), the stale result is cleared
-        (a reopened record must not serve the previous generation's
-        outputs while the new generation is still pending), and any
-        cancel request is consumed by the reopen.
+        Mirrors the production storage semantics: reopen is only legal
+        on a TERMINAL record (succeeded/failed/cancelled); a pending or
+        running record raises (InvalidStatusTransferError on real
+        redis). The old status is recorded as previous_status (the
+        engine tier's memo layer reads it for on_resume routing), the
+        stale result is cleared (a reopened record must not serve the
+        previous generation's outputs while the new generation is
+        still pending), and any cancel request is consumed.
         """
         rec = self.records[task_id]
+        current_status = rec.get("status")
+        if current_status not in TERMINAL_WORDS:
+            raise ValueError(
+                f"reopen rejected: task {task_id} is not terminal "
+                f"(current: {current_status})"
+            )
         prevs = list(rec.get("previous_execution_ids", []))
         current = rec.get("execution_id")
         if current:
             prevs.append(current)
         rec["previous_execution_ids"] = prevs
-        rec["previous_status"] = rec.get("status")
+        rec["previous_status"] = current_status
         rec["execution_id"] = f"exec-{uuid.uuid4().hex[:12]}"
         rec["status"] = "pending"
         rec.pop("cancel_requested", None)

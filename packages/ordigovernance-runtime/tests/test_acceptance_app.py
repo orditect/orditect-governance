@@ -50,3 +50,9 @@ async def test_acceptance_run_settles_succeeded(tmp_path):
         "paused/resumed researcher-2 must carry two generations"
     assert "cancelled" in {r.get("status") for r in r2_rows}, \
         "the HITL pause beat must settle one cancelled generation"
+    # Reopen chain preserved (evidence: two distinct eids in snapshots,
+    # asserted above). The self-loop pin belongs to the supervisor
+    # pattern, not to researchers; researcher archives carry no pins
+    # by design (see ResearcherImpl). Stronger chain evidence (hot
+    # record previous_execution_ids) is verified by the real-redis
+    # acceptance run (real_app), not by this in-memory fixture test.

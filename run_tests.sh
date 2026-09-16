@@ -18,6 +18,7 @@ SUITES=(
     "packages/ordigovernance-bridges-langgraph/tests"
     "packages/ordigovernance-bridges-deepagents/tests"
     "packages/ordigovernance-bridges-direct/tests"
+    "packages/ordigovernance-gateway/tests"
 )
 
 for suite in "${SUITES[@]}"; do

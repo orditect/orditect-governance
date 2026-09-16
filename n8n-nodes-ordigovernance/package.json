@@ -1,0 +1,49 @@
+{
+  "name": "n8n-nodes-ordigovernance",
+  "version": "0.1.0",
+  "description": "n8n community nodes bridging to the ordigovernance gateway: governed chat model, run lifecycle, governed tools, task submissions and HITL approvals",
+  "license": "MIT",
+  "homepage": "https://github.com/orditect/orditect-governance",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/orditect/n8n-nodes-ordigovernance.git"
+  },
+  "author": {
+    "name": "orditect project"
+  },
+  "keywords": [
+    "n8n-community-node-package"
+  ],
+  "main": "index.js",
+  "scripts": {
+    "build": "tsc && gulp build:icons",
+    "dev": "tsc --watch",
+    "format": "prettier nodes credentials test --write",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": [
+      "dist/credentials/OrdigovernanceApi.credentials.js"
+    ],
+    "nodes": [
+      "dist/nodes/OrdigovernanceChatModel/OrdigovernanceChatModel.node.js"
+    ]
+  },
+  "peerDependencies": {
+    "@langchain/core": ">=0.3.0 <0.4.0"
+  },
+  "devDependencies": {
+    "@langchain/core": "^0.3.42",
+    "@types/node": "^20.14.0",
+    "gulp": "^5.0.0",
+    "n8n-workflow": "^1.82.0",
+    "prettier": "^3.3.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}

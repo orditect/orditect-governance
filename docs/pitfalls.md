@@ -413,6 +413,29 @@ request arriving while mermaid is busy must coalesce to the latest
 definition, never drop (a dropped frame leaves the DAG one poll
 behind until the next signature change).
 
+### 14.8 Reopen chains died at re-initialize, not at reopen (FIXED upstream)
+Probe (scripts/probe_reopen_semantics.py) against real TaskRedisDB
+showed: reopen_task preserves previous_execution_ids, writes
+previous_status and clears result; initialize_task on an EXISTING
+record reset the chain unconditionally. A manual reopen followed by
+orchestrator.submit therefore lost the whole generation chain on real
+redis while the in-memory fixture (setdefault-based initialize)
+silently kept it. FIXED in orditect v0.1.8: submit() is schedule-only
+for PENDING existing records (scheduled WITHOUT re-initialization);
+the storage-layer reset semantics remain for explicit resets.
+
+### 14.9 The reopen+resubmit contract: never if_not_exists=True
+Orchestrator.submit(if_not_exists=True) is a full idempotent skip:
+the task is never registered for execution. After reopen_task,
+resubmit WITHOUT if_not_exists (default False): the record is PENDING
+(reopen_task set it), so the v0.1.8+ schedule-only path preserves the
+chain AND executes. Earlier versions of this repo's examples carried
+an update_task(status="pending") workaround plus an if_not_exists
+experiment that deadlocked the run; both removed once the framework
+fix landed. Storage-layer initialize_task(if_not_exists=False) still
+resets by design (explicit reset path) -- do not call it on a
+reopened record.
+
 ## 15. Real-endpoint verification lessons (probe bring-up)
 
 ### 15.1 Optional configuration loaders must never skip silently
@@ -462,3 +485,61 @@ record the verified versions in the comment for later removal.
 Related micro-lesson: check versions with importlib.metadata.version
 or pip show — several packages (anyio) expose no __version__
 attribute.
+
+## 16. Gateway (n8n bridge) lessons
+
+### 16.1 Dynamic registry loading bypasses the static import gate
+scripts/check_import_boundary.py scans only STATIC imports inside
+packages/*/src. The gateway loads impl/tool/composite factories at
+boot through entry points and GATEWAY_REGISTRY_MODULE -- invisible to
+the gate. A deployment pointing the module channel at a closed-tier
+package would smuggle forbidden imports past CI. The gateway
+re-checks every loaded factory's __module__ against the forbidden
+namespaces at boot and REFUSES to start on a hit, listing the
+offender (registry.validate_registry). Rule: any runtime-loaded
+extension point needs its own boot-time boundary check; static gates
+only cover static imports.
+
+### 16.2 The ambient run coexists with the single-active guard
+Call-plane requests without a run_id need somewhere to land, but
+opening a user run for them would serialize all such calls behind
+the single-active guard. The gateway opens one ambient run at boot
+(run_id "ambient", never finished, torn down at shutdown) and routes
+run_id-less calls there; it is NOT counted as the active run, so a
+user run can start while ambient traffic flows. Both share the
+process-wide hot path: semaphore queueing stays process-global, which
+is correct (one backend, one resource reality). Ambient budget
+exhaustion degrades honestly to 409, never silently.
+
+### 16.3 Composites are drive-level drivers, never supervisor nodes
+A composite (quality gate, fan-out driver) must NOT be packaged as a
+supervisor node inside the executor: pitfall 13.1 applies -- inline
+fan-outs flatten the lineage tree and produce zero snapshots. The
+gateway runs composites as background asyncio tasks inside the
+session; children submit with parent_task_id=run root and evidence
+closes through the child tasks. Child attribution uses a contextvar
+set inside the composite's own task (_COMPOSITE_CTX): concurrent
+composites stay isolated, and submit_task/register_descriptor pick up
+the attribution transparently. A composite failure lands on the
+composite's own status endpoint, never on the run.
+
+### 16.4 Composite children register descriptors BEFORE the pattern submits
+Patterns like QualityGatePattern perform the first submission
+themselves, so the gateway's submit_task path never sees their
+children -- but the action sink's reopen path and HITL retry rebuild
+tasks through task_factory, which resolves only REGISTERED
+descriptors. Composite drivers therefore call
+session.register_descriptor() up front (validation + duplicate check,
+no submission) and build instances through session.assemble_task(),
+keeping one construction source for first submit and recovery alike
+(pitfall 13.8). Registering without submitting is the composite-side
+half of the single-source rule.
+
+### 16.5 Hot reads close at finish; evidence reads belong to the cold path
+The gateway serves hot-record reads (GET /runs/{id}/tasks/{tid}) only
+while the run is active; after finish they 404. This is deliberate:
+the run context is torn down at finish, and answering historical
+reads from a dead session would resurrect the pitfall 13.6 shape
+(actions into a dead dispatcher). Historical evidence is the viewer's
+job over the shared trace_root (examples/gateway_n8n/viewer_app.py).
+One gateway process = write path; the viewer = read path.
