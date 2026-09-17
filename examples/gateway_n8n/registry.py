@@ -21,7 +21,7 @@ an installed distribution, so this demo uses the module channel.
 from __future__ import annotations
 
 import re
-
+import asyncio
 from ordigovernance.gateway.registry import (
     CompositeSpec,
     GatewayRegistry,
@@ -169,7 +169,42 @@ class PublisherImpl:
         await ctx.archive(result, pins=pins)
         return result
 
+class SlowResearcherImpl:
+    """Researcher with a long cooperative window for HITL pause demos.
 
+    Identical governance shape to ResearcherImpl (one memoized world
+    read, one LLM analysis, self-archive); a parameterized delay runs
+    first so a pause action lands while the generation is executing.
+    """
+
+    def __init__(self, params: dict, surfaces: dict) -> None:
+        self._topic = params.get("topic") or "general"
+        self._delay_seconds = float(params.get("delay_seconds", 30))
+
+    async def run(self, ctx) -> dict:
+        steps = max(1, int(self._delay_seconds))
+        for _ in range(steps):
+            await asyncio.sleep(1)
+        read, _ = await ctx.memoize(
+            "search", 1, {"q": self._topic},
+            lambda: ctx.tool_call(
+                "search", self._topic, purpose="search", seq=1,
+                params={"q": self._topic}),
+        )
+        analysis = await ctx.llm_call(
+            "research", "analyze", 2,
+            messages=[{"role": "user",
+                       "content": f"Analyze {self._topic} "
+                                  f"using {read!r}"}],
+        )
+        result = {
+            "topic": self._topic,
+            "snippets": read.get("count"),
+            "analysis": analysis["choices"][0]["message"]["content"],
+            "origins": dict(ctx.origins),
+        }
+        await ctx.archive(result, pins={})
+        return result
 # ---- composites -------------------------------------------------------------
 
 
@@ -239,7 +274,6 @@ def quality_gate_pair_factory(params: dict, session):
 
 # ---- registry assembly --------------------------------------------------------
 
-
 def build_registry() -> GatewayRegistry:
     """The reference vocabulary for the gateway n8n demo."""
     return GatewayRegistry(
@@ -254,6 +288,10 @@ def build_registry() -> GatewayRegistry:
             "researcher": ImplSpec(
                 factory=ResearcherImpl,
                 description="one world read plus one LLM analysis"),
+            "slow_researcher": ImplSpec(
+                factory=SlowResearcherImpl,
+                description="researcher with a cooperative delay window "
+                            "for HITL pause demos"),
             "writer": ImplSpec(
                 factory=WriterImpl,
                 description="draft from succeeded upstream hot records"),

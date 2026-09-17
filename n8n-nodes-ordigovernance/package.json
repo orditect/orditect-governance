@@ -1,7 +1,7 @@
 {
   "name": "n8n-nodes-ordigovernance",
   "version": "0.1.0",
-  "description": "n8n community nodes bridging to the ordigovernance gateway: governed chat model, run lifecycle, governed tools, task submissions and HITL approvals",
+  "description": "n8n community nodes bridging to the ordigovernance gateway: governed chat model, run lifecycle, governed tools, task submissions, HITL approvals and drive-level composites",
   "license": "MIT",
   "homepage": "https://github.com/orditect/orditect-governance",
   "repository": {
@@ -20,10 +20,12 @@
     "dev": "tsc --watch",
     "format": "prettier nodes credentials test --write",
     "test": "vitest run",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build && npm test"
   },
   "files": [
-    "dist"
+    "dist",
+    "LICENSE",
+    "README.md"
   ],
   "n8n": {
     "n8nNodesApiVersion": 1,
@@ -31,14 +33,19 @@
       "dist/credentials/OrdigovernanceApi.credentials.js"
     ],
     "nodes": [
-      "dist/nodes/OrdigovernanceChatModel/OrdigovernanceChatModel.node.js"
+      "dist/nodes/OrdigovernanceChatModel/OrdigovernanceChatModel.node.js",
+      "dist/nodes/OrdigovernanceRun/OrdigovernanceRun.node.js",
+      "dist/nodes/OrdigovernanceTool/OrdigovernanceTool.node.js",
+      "dist/nodes/OrdigovernanceTask/OrdigovernanceTask.node.js",
+      "dist/nodes/OrdigovernanceApproval/OrdigovernanceApproval.node.js",
+      "dist/nodes/OrdigovernanceComposite/OrdigovernanceComposite.node.js"
     ]
   },
   "peerDependencies": {
-    "@langchain/core": ">=0.3.0 <0.4.0"
+    "@langchain/core": ">=1.0.0 <2.0.0"
   },
   "devDependencies": {
-    "@langchain/core": "^0.3.42",
+    "@langchain/core": "1.2.0",
     "@types/node": "^20.14.0",
     "gulp": "^5.0.0",
     "n8n-workflow": "^1.82.0",

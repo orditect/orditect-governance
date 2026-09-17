@@ -198,4 +198,47 @@ describe('governed call contract', () => {
 			/gateway unreachable at http:\/\/gw:8180/,
 		);
 	});
+		describe('tools agent compatibility', () => {
+		it('exposes bindTools for the tools agent probe', () => {
+			const model = new TrackedChatModel(CONFIG);
+			expect(typeof model.bindTools).toBe('function');
+		});
+
+		it('forwards bound tools to the gateway on invocation', async () => {
+			fetchMock.mockResolvedValue(
+				okResponse({
+					status: 'ok',
+					call_id: 'cid-bound',
+					response: { choices: [{ message: { content: 'ok' } }] },
+				}),
+			);
+			const bound = new TrackedChatModel(CONFIG).bindTools([OPENAI_TOOL_SPEC]);
+			await bound.invoke([new HumanMessage('hi')]);
+
+			expect(fetchMock).toHaveBeenCalledTimes(1);
+			const payload = JSON.parse(
+				String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body),
+			);
+			expect(payload.kwargs.tools).toEqual([OPENAI_TOOL_SPEC]);
+		});
+
+		it('passes already wire-shaped tool specs through unchanged', async () => {
+			fetchMock.mockResolvedValue(
+				okResponse({
+					status: 'ok',
+					call_id: 'cid-wire',
+					response: { choices: [{ message: { content: 'ok' } }] },
+				}),
+			);
+			const model = new TrackedChatModel(CONFIG);
+			await model._generate([new HumanMessage('hi')], {
+				tools: [OPENAI_TOOL_SPEC],
+			} as never);
+
+			const payload = JSON.parse(
+				String((fetchMock.mock.calls[0] as [string, RequestInit])[1].body),
+			);
+			expect(payload.kwargs.tools).toEqual([OPENAI_TOOL_SPEC]);
+		});
+	});
 });

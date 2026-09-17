@@ -543,3 +543,53 @@ reads from a dead session would resurrect the pitfall 13.6 shape
 (actions into a dead dispatcher). Historical evidence is the viewer's
 job over the shared trace_root (examples/gateway_n8n/viewer_app.py).
 One gateway process = write path; the viewer = read path.
+
+### 16.6 D7 dedup is run-scoped; the hot path is not the duplicate table
+submit_task originally rejected any task_id with an existing hot
+record; the hot path is shared across runs, so a record left by a
+PREVIOUS run 409'd the next run's submission (field-verified:
+`task 'researcher-m3' is already submitted in run 'run-...'` on a
+brand-new run). The duplicate guard now keys on the session's
+descriptor registry -- same-run duplicates still 409, and the run
+root id is rejected with the same verdict. A cross-run id collision
+is a fresh generation on a stale record; the old run's evidence
+stays in its own cold path. Clients needing cross-run uniqueness
+must mint unique ids (the n8n nodes suffix the execution id).
+Locked by test_task_id_from_a_finished_run_does_not_block_a_new_run.
+
+### 16.7 Run-scoped reads must not pass through to the global hot path
+GET /runs/{id}/tasks/{tid} read the shared hot storage directly, so
+a NEW run returned a PREVIOUS run's record (field-verified: a fresh
+run answered with another run's cancelled record and its old
+execution_id). The same leak existed on the call plane:
+allocate_call_identity attributed calls to any hot record. Both
+paths now resolve ownership through the session's descriptor
+registry (plus the run root) before touching the hot path; the
+ambient run is exempt by design (D2 catch-all attribution bucket).
+Locked by test_task_reads_are_run_scoped_over_the_shared_hot_path
+and test_call_plane_task_attribution_is_run_scoped.
+
+### 16.8 Direct (non-sink) actions owe the client a receipt too
+HITL retry is deliberately direct (reopen + resubmit, no sink
+action), but it returned a fabricated `retry-direct-*` action_id the
+receipt endpoint had never heard of: clients polling it got 404
+forever and read the action as pending (the n8n Approval node would
+have waited the full poll timeout). The gateway now records the
+execution receipt synchronously at accept time -- the reopen +
+resubmit has already happened -- and the receipt endpoint serves it
+as a fallback after the sink table. Locked by
+test_retry_receipt_is_served_for_direct_actions.
+
+### 16.9 accepted != executed when the dispatcher is dead (framework-level hazard)
+Field incident: a pause settled the task cancelled; two resumes then
+returned accepted=true and no generation ever reran; the receipt
+endpoint later 404'd (run finished). The action queue was dead
+while the run still looked active -- pitfall 13.6's shape one layer
+down. The route-level guard (404 on non-active runs) cannot see a
+dead dispatcher inside a live session, and the sink's accepted flag
+only means "queued". The only truth is the EXECUTION receipt plus
+the hot record's previous_execution_ids. Client discipline: never
+treat accepted as evidence; poll the receipt AND the record (the
+n8n node's waitForReceipt + awaitDecision shape). Detection recipe:
+receipt never arrives AND prevs unchanged after the expected
+latency -> the dispatcher is dead; finish and restart the run.

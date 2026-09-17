@@ -1,0 +1,118 @@
+{
+  "name": "M3 HITL approval (gateway)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "f1a00001-0000-4000-8000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-480, 300]
+    },
+    {
+      "parameters": {
+        "operation": "start",
+        "client": "n8n",
+        "purpose": "m3-hitl",
+        "metadata": "{}",
+        "finishExistingOnConflict": true
+      },
+      "id": "f1a00001-0000-4000-8000-000000000002",
+      "name": "Run Start",
+      "type": "CUSTOM.ordigovernanceRun",
+      "typeVersion": 1,
+      "position": [-256, 300]
+    },
+    {
+      "parameters": {
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "=slow-{{ $execution.id }}",
+        "impl": "slow_researcher",
+        "taskInput": "{\n  \"topic\": \"EV batteries\",\n  \"delay_seconds\": 45\n}",
+        "upstream": "",
+        "waitForCompletion": false
+      },
+      "id": "f1a00001-0000-4000-8000-000000000003",
+      "name": "Submit Task",
+      "type": "CUSTOM.ordigovernanceTask",
+      "typeVersion": 1,
+      "position": [-16, 300]
+    },
+    {
+      "parameters": {
+        "operation": "pause",
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "={{ $('Submit Task').first().json.task_id }}",
+        "waitForReceipt": true,
+        "pollIntervalMs": 500,
+        "pollTimeoutMs": 60000
+      },
+      "id": "f1a00001-0000-4000-8000-000000000004",
+      "name": "Pause Task",
+      "type": "CUSTOM.ordigovernanceApproval",
+      "typeVersion": 1,
+      "position": [224, 300]
+    },
+    {
+      "parameters": {
+        "operation": "awaitDecision",
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "={{ $('Submit Task').first().json.task_id }}",
+        "pollIntervalMs": 1000,
+        "pollTimeoutMs": 600000
+      },
+      "id": "f1a00001-0000-4000-8000-000000000005",
+      "name": "Await Decision",
+      "type": "CUSTOM.ordigovernanceApproval",
+      "typeVersion": 1,
+      "position": [464, 300]
+    },
+    {
+      "parameters": {
+        "amount": 75,
+        "unit": "seconds"
+      },
+      "id": "f1a00001-0000-4000-8000-000000000006",
+      "name": "Wait For Generation",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [704, 300],
+      "webhookId": "m3-wait-node"
+    },
+    {
+      "parameters": {
+        "operation": "finish",
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "finalStatus": "succeeded",
+        "summary": "m3 hitl demo done"
+      },
+      "id": "f1a00001-0000-4000-8000-000000000007",
+      "name": "Run Finish",
+      "type": "CUSTOM.ordigovernanceRun",
+      "typeVersion": 1,
+      "position": [944, 300]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Run Start", "type": "main", "index": 0 }]]
+    },
+    "Run Start": {
+      "main": [[{ "node": "Submit Task", "type": "main", "index": 0 }]]
+    },
+    "Submit Task": {
+      "main": [[{ "node": "Pause Task", "type": "main", "index": 0 }]]
+    },
+    "Pause Task": {
+      "main": [[{ "node": "Await Decision", "type": "main", "index": 0 }]]
+    },
+    "Await Decision": {
+      "main": [[{ "node": "Wait For Generation", "type": "main", "index": 0 }]]
+    },
+    "Wait For Generation": {
+      "main": [[{ "node": "Run Finish", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

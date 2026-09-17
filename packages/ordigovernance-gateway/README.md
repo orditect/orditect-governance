@@ -95,7 +95,10 @@ instruction.
 TaskDescriptor: `{task_id, impl, params{}, upstream[], parent_task_id?,
 tools?[]}`. `upstream` writes dependency edges (child = this task,
 parent = u) — evidence/graph, never scheduling; the orchestrator owns
-ordering. Duplicate task_id -> 409 (a rerun goes through HITL retry).
+ordering. Duplicate task_id within a run -> 409 (a rerun goes through
+HITL retry); the duplicate guard is run-scoped and task reads resolve
+ownership through the session, never through the shared hot path
+(docs/pitfalls.md 16.6/16.7).
 finish -> 409 listing non-terminal tasks; after finish the run is no
 longer active and hot reads close (historical evidence belongs to the
 viewer cold path). The vocabulary endpoint also answers on
@@ -113,8 +116,9 @@ Dual receipt discipline: mutating calls return the ACCEPTANCE
 receipt; poll the receipt endpoint for the EXECUTION receipt. Retry:
 terminal-only (409 otherwise), run root rejected (422), orphan
 guard rejects when declared descendants are ACTIVE (409), task
-rebuilt from the registered descriptor. All endpoints 404 once the
-run ends.
+rebuilt from the registered descriptor. Retry is synchronous, so its
+`retry-direct-*` receipt answers immediately at the receipt endpoint
+(pitfalls 16.8). All endpoints 404 once the run ends.
 
 ### Composites (drive-level background drivers)
 

@@ -1,3 +1,4 @@
+
 """In-process M3 rehearsal: the n8n demo registry over HTTP.
 
 Drives the full demo narrative (researcher fan-out -> writer ->
@@ -273,7 +274,8 @@ def test_demo_vocabulary_lists_reference_names(demo_client, auth_headers):
     assert resp.status_code == 200
     body = resp.json()
     assert {e["name"] for e in body["impls"]} == \
-        {"researcher", "writer", "reviewer", "publisher"}
+        {"researcher", "writer", "reviewer", "publisher",
+         "slow_researcher"}
     assert {e["name"] for e in body["tools"]} == {"search"}
     assert {e["name"] for e in body["composites"]} == \
         {"quality_gate_pair"}

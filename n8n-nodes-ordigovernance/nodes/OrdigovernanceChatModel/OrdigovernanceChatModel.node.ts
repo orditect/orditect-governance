@@ -108,8 +108,8 @@ export class OrdigovernanceChatModel implements INodeType {
 			token: String(credentials.token ?? ''),
 			client,
 			purpose,
-			runId: options.runId || undefined,
-			taskId: options.taskId || undefined,
+			runId: options.runId?.trim() || undefined,
+			taskId: options.taskId?.trim() || undefined,
 			timeout: options.timeout,
 		});
 		return { response: model };

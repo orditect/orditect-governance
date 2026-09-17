@@ -191,6 +191,30 @@ def test_retry_terminal_node_reopens_new_generation(hitl_client,
     assert gen1 in rerun["previous_execution_ids"]
 
 
+def test_retry_receipt_is_served_for_direct_actions(hitl_client,
+                                                    auth_headers):
+    # Direct (non-sink) actions owe the client an execution receipt
+    # too (docs/pitfalls.md 16.8): reopen + resubmit is synchronous,
+    # so the receipt answers immediately after the acceptance.
+    run_id = _start_run(hitl_client, auth_headers)
+    hitl_client.post(f"/runs/{run_id}/tasks",
+                     json={"task_id": "node-1", "impl": "echo",
+                           "params": {}},
+                     headers=auth_headers)
+    _wait_terminal(hitl_client, run_id, "node-1", auth_headers)
+    resp = hitl_client.post(f"/runs/{run_id}/hitl/retry",
+                            json={"task_id": "node-1"},
+                            headers=auth_headers)
+    assert resp.status_code == 200
+    action_id = resp.json()["action_id"]
+    receipt = hitl_client.get(
+        f"/runs/{run_id}/hitl/receipt/{action_id}",
+        headers=auth_headers)
+    assert receipt.status_code == 200
+    assert receipt.json()["action_id"] == action_id
+    assert receipt.json()["status"] == "executed"
+    _wait_terminal(hitl_client, run_id, "node-1", auth_headers)
+
 def test_retry_rejects_non_terminal_node(hitl_client, auth_headers):
     run_id = _start_run(hitl_client, auth_headers)
     hitl_client.post(f"/runs/{run_id}/tasks",

@@ -1,0 +1,159 @@
+{
+  "name": "M4 narrative fan-in (gateway)",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "m4a00001-0000-4000-8000-000000000001",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-480, 300]
+    },
+    {
+      "parameters": {
+        "operation": "start",
+        "client": "n8n",
+        "purpose": "m4-narrative",
+        "metadata": "{}",
+        "finishExistingOnConflict": true
+      },
+      "id": "m4a00001-0000-4000-8000-000000000002",
+      "name": "Run Start",
+      "type": "CUSTOM.ordigovernanceRun",
+      "typeVersion": 1,
+      "position": [-256, 300]
+    },
+    {
+      "parameters": {
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "=researcher-1-{{ $execution.id }}",
+        "impl": "researcher",
+        "taskInput": "{\n  \"topic\": \"EV battery technology\"\n}",
+        "upstream": "",
+        "waitForCompletion": true,
+        "pollIntervalMs": 2000,
+        "pollTimeoutMs": 180000
+      },
+      "id": "m4a00001-0000-4000-8000-000000000003",
+      "name": "Researcher 1",
+      "type": "CUSTOM.ordigovernanceTask",
+      "typeVersion": 1,
+      "position": [-16, 160]
+    },
+    {
+      "parameters": {
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "=researcher-2-{{ $execution.id }}",
+        "impl": "researcher",
+        "taskInput": "{\n  \"topic\": \"EV battery market\"\n}",
+        "upstream": "",
+        "waitForCompletion": true,
+        "pollIntervalMs": 2000,
+        "pollTimeoutMs": 180000
+      },
+      "id": "m4a00001-0000-4000-8000-000000000004",
+      "name": "Researcher 2",
+      "type": "CUSTOM.ordigovernanceTask",
+      "typeVersion": 1,
+      "position": [-16, 440]
+    },
+    {
+      "parameters": {
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "=writer-{{ $execution.id }}",
+        "impl": "writer",
+        "taskInput": "={\n  \"upstream\": [\"{{ $('Researcher 1').first().json.task_id }}\", \"{{ $('Researcher 2').first().json.task_id }}\"]\n}",
+        "upstream": "={{ $('Researcher 1').first().json.task_id }},{{ $('Researcher 2').first().json.task_id }}",
+        "waitForCompletion": true,
+        "pollIntervalMs": 2000,
+        "pollTimeoutMs": 180000
+      },
+      "id": "m4a00001-0000-4000-8000-000000000006",
+      "name": "Writer",
+      "type": "CUSTOM.ordigovernanceTask",
+      "typeVersion": 1,
+      "position": [240, 440],
+      "settings": { "executeOnce": true },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "=reviewer-{{ $execution.id }}",
+        "impl": "reviewer",
+        "taskInput": "={\n  \"producer_id\": \"{{ $('Writer').first().json.task_id }}\"\n}",
+        "upstream": "={{ $('Writer').first().json.task_id }}",
+        "waitForCompletion": true,
+        "pollIntervalMs": 2000,
+        "pollTimeoutMs": 180000
+      },
+      "id": "m4a00001-0000-4000-8000-000000000007",
+      "name": "Reviewer",
+      "type": "CUSTOM.ordigovernanceTask",
+      "typeVersion": 1,
+      "position": [480, 440],
+      "settings": { "executeOnce": true },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "taskId": "=publisher-{{ $execution.id }}",
+        "impl": "publisher",
+        "taskInput": "={\n  \"producer_id\": \"{{ $('Writer').first().json.task_id }}\"\n}",
+        "upstream": "={{ $('Writer').first().json.task_id }}",
+        "waitForCompletion": true,
+        "pollIntervalMs": 2000,
+        "pollTimeoutMs": 180000
+      },
+      "id": "m4a00001-0000-4000-8000-000000000008",
+      "name": "Publisher",
+      "type": "CUSTOM.ordigovernanceTask",
+      "typeVersion": 1,
+      "position": [720, 440],
+      "settings": { "executeOnce": true },
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "operation": "finish",
+        "runId": "={{ $('Run Start').first().json.run_id }}",
+        "finalStatus": "succeeded",
+        "summary": "m4 narrative done"
+      },
+      "id": "m4a00001-0000-4000-8000-000000000009",
+      "name": "Run Finish",
+      "type": "CUSTOM.ordigovernanceRun",
+      "typeVersion": 1,
+      "position": [960, 440]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [[{ "node": "Run Start", "type": "main", "index": 0 }]]
+    },
+    "Run Start": {
+      "main": [[
+        { "node": "Researcher 1", "type": "main", "index": 0 },
+        { "node": "Researcher 2", "type": "main", "index": 0 }
+      ]]
+    },
+    "Researcher 1": {
+      "main": [[]]
+    },
+    "Researcher 2": {
+      "main": [[{ "node": "Writer", "type": "main", "index": 0 }]]
+    },
+    "Writer": {
+      "main": [[{ "node": "Reviewer", "type": "main", "index": 0 }]]
+    },
+    "Reviewer": {
+      "main": [[{ "node": "Publisher", "type": "main", "index": 0 }]]
+    },
+    "Publisher": {
+      "main": [[{ "node": "Run Finish", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {},
+  "pinData": {}
+}

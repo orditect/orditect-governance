@@ -20,6 +20,7 @@ import {
 	BaseChatModel,
 	type BaseChatModelCallOptions,
 	type BaseChatModelParams,
+	type BindToolsInput,
 } from '@langchain/core/language_models/chat_models';
 import {
 	AIMessage,
@@ -29,8 +30,8 @@ import {
 } from '@langchain/core/messages';
 import type { ToolCall } from '@langchain/core/messages/tool';
 import type { ChatResult } from '@langchain/core/outputs';
+import type { Runnable, RunnableConfig } from '@langchain/core/runnables';
 import { convertToOpenAITool } from '@langchain/core/utils/function_calling';
-
 
 const ROLE_MAP: Record<string, string> = {
 	human: 'user',
@@ -95,6 +96,21 @@ function rawToolCallsOf(message: AIMessage): unknown[] | undefined {
 		},
 	}));
 }
+
+function toOpenAiToolSpec(tool: unknown): unknown {
+	// bindTools already converted these to the endpoint-native shape;
+	// pass wire-shaped entries through untouched, convert everything else.
+	if (
+		tool &&
+		typeof tool === 'object' &&
+		(tool as { type?: unknown }).type === 'function' &&
+		'function' in tool
+	) {
+		return tool;
+	}
+	return convertToOpenAITool(tool as Parameters<typeof convertToOpenAITool>[0]);
+}
+
 
 export function toOpenAiMessages(messages: BaseMessage[]): Array<Record<string, unknown>> {
 	const out: Array<Record<string, unknown>> = [];
@@ -238,6 +254,22 @@ export class TrackedChatModel extends BaseChatModel {
 		return `tracked-${this.gateway?.client ?? 'unknown'}`;
 	}
 
+
+	bindTools(
+		tools: BindToolsInput[],
+		kwargs?: Partial<BaseChatModelCallOptions>,
+	): Runnable {
+		// n8n's Tools Agent probes `typeof model.bindTools === 'function'`
+		// before accepting a chat model; without this method the agent
+		// rejects the node with "requires Chat Model which supports Tools
+		// calling". withConfig produces a RunnableBinding that merges these
+		// options into every downstream invocation; _generate forwards them
+		// to the gateway verbatim on every governed call.
+		return this.withConfig({
+			tools: tools.map((tool) => toOpenAiToolSpec(tool)),
+			...kwargs,
+		} as unknown as RunnableConfig);
+	}
 	async _generate(
 		messages: BaseMessage[],
 		options: BaseChatModelCallOptions,
@@ -250,10 +282,8 @@ export class TrackedChatModel extends BaseChatModel {
 		const requestKwargs: Record<string, unknown> = {};
 		for (const [key, value] of Object.entries(options)) {
 			if (value === undefined || TRANSPORT_OPTION_KEYS.has(key)) continue;
-				if (key === 'tools') {
-				requestKwargs.tools = (value as unknown[]).map((tool) =>
-					convertToOpenAITool(tool as Parameters<typeof convertToOpenAITool>[0]),
-				);
+			if (key === 'tools') {
+				requestKwargs.tools = (value as unknown[]).map((tool) => toOpenAiToolSpec(tool));
 			} else {
 				requestKwargs[key] = value;
 			}

@@ -104,6 +104,7 @@ class RunSession:
         self._seq_counters: dict[tuple[str, str], int] = {}
         self.composites: dict[str, dict] = {}
         self._composite_tasks: dict[str, asyncio.Task] = {}
+        self.direct_receipts: dict[str, dict] = {}
 
     @property
     def hot(self) -> dict:
@@ -222,11 +223,17 @@ class RunSession:
         never scheduling) -> submit with the run root as the default
         snapshot parent (pitfall 10: drive-layer submissions must
         carry the parent explicitly) -> descriptor registration.
+
+        D7 scope (pitfalls 16.6): the duplicate guard is RUN-scoped
+        (the session's descriptor registry), never the shared hot
+        path. A record left by a PREVIOUS run under the same task id
+        is not a duplicate: the submit gives the new run a fresh
+        generation on that record, and the old run's evidence stays
+        in its own cold path. Deployments that need cross-run
+        uniqueness must mint unique ids in their clients (the n8n
+        nodes suffix the execution id).
         """
         self._validate_descriptor(descriptor)
-        existing = await self.hot["storage"].get_task(descriptor.task_id)
-        if existing:
-            raise DuplicateTaskError(descriptor.task_id)
         agent = self._assemble(descriptor)
         parent_id = descriptor.parent_task_id or self.root_id
         if descriptor.upstream:
@@ -269,6 +276,11 @@ class RunSession:
                     f"unknown tool {tool_name!r} in the tools "
                     f"whitelist; registered: "
                     f"{sorted(self._registry.tools)}")
+        # The run root's hot record is initialized at session open;
+        # a task under that id would collide with the scope root
+        # (pitfalls 4) -- reject it with the same verdict class.
+        if descriptor.task_id == self.root_id:
+            raise DuplicateTaskError(descriptor.task_id)
         if descriptor.task_id in self.descriptors:
             raise DuplicateTaskError(descriptor.task_id)
 
@@ -362,11 +374,23 @@ class RunSession:
 
     async def allocate_call_identity(self, task_id: str | None,
                                      purpose: str) -> tuple[str, str, int]:
-        """Resolve (task_id, eid, seq) for one call-plane call (D8)."""
+        """Resolve (task_id, eid, seq) for one call-plane call (D8).
+
+        Ownership discipline (pitfalls 16.7): inside a user run a
+        task_id must belong to the run (descriptor registry or the
+        run root) before its hot record is read -- the hot path is
+        shared across runs, so a record existing is not proof of
+        ownership. The ambient run is exempt by design: it is the
+        catch-all attribution bucket for run-less traffic (D2).
+        """
         if task_id is None:
             task_id = f"n8n-call-{uuid.uuid4().hex[:8]}"
             eid = f"e-{uuid.uuid4().hex[:8]}"
         else:
+            if (self.run_id != AMBIENT_RUN_ID
+                    and task_id != self.root_id
+                    and task_id not in self.descriptors):
+                raise KeyError(task_id)
             record = await self.hot["storage"].get_task(task_id)
             if not record:
                 raise KeyError(task_id)

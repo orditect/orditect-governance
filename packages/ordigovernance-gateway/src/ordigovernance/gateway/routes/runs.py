@@ -119,6 +119,16 @@ def build_runs_router(
     async def get_task(run_id: str,
                        task_id: str) -> TaskRecordResponse:
         session = _active_session(run_id)
+        # Run-scoped reads (pitfalls 16.7): the hot path is shared
+        # across runs, so a record existing under a task id is not
+        # proof the task belongs to THIS run. Ownership resolves
+        # through the session's descriptor registry plus the run
+        # root before the hot path is touched.
+        if (task_id != session.root_id
+                and task_id not in session.descriptors):
+            raise HTTPException(
+                status_code=404,
+                detail=f"unknown task {task_id!r} in run {run_id!r}")
         record = await session.hot["storage"].get_task(task_id)
         if not record:
             raise HTTPException(

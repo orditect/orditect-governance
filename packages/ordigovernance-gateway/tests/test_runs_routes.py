@@ -122,6 +122,72 @@ def test_submit_duplicate_task_409(registry_client, auth_headers):
     assert resp.status_code == 409
     assert "task-a" in resp.json()["detail"]
 
+def test_task_id_from_a_finished_run_does_not_block_a_new_run(
+        registry_client, auth_headers):
+    # D7 is run-scoped: a record left on the shared hot path by a
+    # finished run must not 409 the next run's submission
+    # (docs/pitfalls.md 16.6).
+    run1 = _start_run(registry_client, auth_headers, "run-prev")
+    registry_client.post(f"/runs/{run1}/tasks",
+                         json={"task_id": "task-a", "impl": "echo",
+                               "params": {}},
+                         headers=auth_headers)
+    first = _wait_terminal(registry_client, run1, "task-a",
+                           auth_headers)
+    assert first["status"] == "succeeded"
+    resp = registry_client.post(f"/runs/{run1}/finish",
+                                headers=auth_headers)
+    assert resp.status_code == 200
+
+    run2 = _start_run(registry_client, auth_headers, "run-next")
+    resp = registry_client.post(f"/runs/{run2}/tasks",
+                                json={"task_id": "task-a",
+                                      "impl": "echo", "params": {}},
+                                headers=auth_headers)
+    assert resp.status_code == 201
+    second = _wait_terminal(registry_client, run2, "task-a",
+                            auth_headers)
+    assert second["status"] == "succeeded"
+
+
+def test_task_reads_are_run_scoped_over_the_shared_hot_path(
+        registry_client, auth_headers):
+    # The hot path is process-global; a record existing under a task
+    # id is not proof the task belongs to the addressed run
+    # (docs/pitfalls.md 16.7).
+    run1 = _start_run(registry_client, auth_headers, "run-prev")
+    registry_client.post(f"/runs/{run1}/tasks",
+                         json={"task_id": "task-a", "impl": "echo",
+                               "params": {}},
+                         headers=auth_headers)
+    _wait_terminal(registry_client, run1, "task-a", auth_headers)
+    registry_client.post(f"/runs/{run1}/finish", headers=auth_headers)
+
+    run2 = _start_run(registry_client, auth_headers, "run-next")
+    resp = registry_client.get(f"/runs/{run2}/tasks/task-a",
+                               headers=auth_headers)
+    assert resp.status_code == 404
+
+
+def test_call_plane_task_attribution_is_run_scoped(registry_client,
+                                                   auth_headers):
+    # Same ownership discipline on the call plane (16.7): a user run
+    # must not attribute calls to a record owned by a previous run.
+    run1 = _start_run(registry_client, auth_headers, "run-prev")
+    registry_client.post(f"/runs/{run1}/tasks",
+                         json={"task_id": "task-a", "impl": "echo",
+                               "params": {}},
+                         headers=auth_headers)
+    _wait_terminal(registry_client, run1, "task-a", auth_headers)
+    registry_client.post(f"/runs/{run1}/finish", headers=auth_headers)
+
+    run2 = _start_run(registry_client, auth_headers, "run-next")
+    resp = registry_client.post(
+        "/governed/llm-chat",
+        json={"run_id": run2, "task_id": "task-a", "client": "research",
+              "messages": [{"role": "user", "content": "hi"}]},
+        headers=auth_headers)
+    assert resp.status_code == 404
 
 def test_get_task_unknown_404_and_non_active_run_404(registry_client,
                                                      auth_headers):

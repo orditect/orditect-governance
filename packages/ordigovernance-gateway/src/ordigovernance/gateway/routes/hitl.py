@@ -121,8 +121,19 @@ def build_hitl_router(
         await storage.reopen_task(task_id)
         task = await session.task_factory(task_id)
         await session.resources.orchestrator.submit(task, task_id=task_id)
-        return ActionAcceptedResponse(
-            action_id=f"retry-direct-{task_id}", accepted=True)
+        action_id = f"retry-direct-{task_id}"
+        # Direct (non-sink) actions still owe the client a receipt
+        # (pitfalls 16.8): the reopen + resubmit above is synchronous,
+        # so the execution receipt is available immediately instead of
+        # 404ing forever behind the sink's receipt table.
+        session.direct_receipts[action_id] = {
+            "action_id": action_id,
+            "action_type": "retry",
+            "status": "executed",
+            "detail": f"reopened and resubmitted {task_id!r}",
+        }
+        return ActionAcceptedResponse(action_id=action_id,
+                                      accepted=True)
 
     @router.get("/{run_id}/hitl/receipt/{action_id}")
     async def hitl_receipt(run_id: str, action_id: str) -> dict:
@@ -130,6 +141,9 @@ def build_hitl_router(
         session = _active_session(run_id)
         receipt = await session.resources.sink.get_receipt(action_id)
         if receipt is None:
+            direct = session.direct_receipts.get(action_id)
+            if direct is not None:
+                return direct
             raise HTTPException(
                 status_code=404,
                 detail="receipt not available (action pending)")
