@@ -15,17 +15,9 @@ never notifies the dependency governor.
 Drift attribution is an engine concern. The driver assembles the
 evidence (generation slices, archived results, pin declarations) and
 hands it to the injected drift_engine; with no engine wired the
-reports carry drift=None. The engine protocol is structural:
-
-    engine.build(local_id, generations, statuses, *,
-                 audit_events, results) -> drift report | None
-    engine.compose_range(order, edges, node_reports, *,
-                         baseline_rows, audit_events,
-                         node_pins, pin_task_ids) -> range drift | None
-
-generations may be eid strings or (slice_id, eid) pairs; results maps
-eid -> archived result dict. The engine tier ships the real
-implementation; the open tier's tests use spies.
+reports carry drift=None. The engine contract is pinned as
+ordigovernance.api.DriftEngineProtocol; the open tier's tests use
+spies.
 """
 
 from __future__ import annotations
@@ -36,6 +28,7 @@ import logging
 import uuid
 from typing import Any, Callable
 
+from ordigovernance.api.context import DriftEngineProtocol
 from ordigovernance.api.memo import MemoBackend
 from ordigovernance.api.side_effect import ReusePolicy
 from ordigovernance.runtime.archive.archive import load_generation
@@ -88,7 +81,7 @@ class ReplayDriver:
             archive_backend: MemoBackend | None = None,
             audit_reader: Any = None,
             ledger_writer: Any = None,
-            drift_engine: Any = None,
+            drift_engine: DriftEngineProtocol | None = None,
             id_prefix: str | None = None,
             step_timeout: float = 300.0,
             receipt_timeout: float = 30.0,

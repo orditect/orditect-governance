@@ -10,7 +10,11 @@ Rules (each is checked by scanning source files for import statements):
      and `orditect.*` (its hot-path fixtures wrap the framework).
   4. No packaged code may import `examples` (examples import packages,
      never the other way around).
-
+  5. No packaged code may import underscore-prefixed (private) names
+     across the top-level ordigovernance package boundary
+     (api/runtime/testing/viewer/gateway/bridges-*) or from the
+     orditect framework: cross-package contracts are public names.
+     Private imports inside the same top-level package are allowed.
 Exit code 0 when the boundary holds, 1 with a finding list otherwise.
 """
 
@@ -35,6 +39,45 @@ _IMPORT_RE = re.compile(
     r"^\s*(?:from|import)\s+([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z0-9_]+)*)",
     re.MULTILINE,
 )
+_FROM_IMPORT_RE = re.compile(
+    r"^\s*from\s+([A-Za-z_][A-Za-z0-9_.]*)\s+import\s+(\([^)]*\)|[^\n]+)",
+    re.MULTILINE,
+)
+
+# Namespaces whose private names are contract-protected.
+_PRIVATE_NAMESPACES = ("ordigovernance", "orditect")
+
+
+def _from_imports_of(path: Path) -> list[tuple[str, list[str]]]:
+    """(module, imported names) pairs of one file's from-imports."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+    out: list[tuple[str, list[str]]] = []
+    for module, names_blob in _FROM_IMPORT_RE.findall(text):
+        names = []
+        for raw in names_blob.strip("()").split(","):
+            tokens = raw.split()
+            if tokens:
+                names.append(tokens[0])
+        out.append((module, names))
+    return out
+
+
+def _subpackage_of(path: Path, packages_dir: Path) -> str | None:
+    """The top-level ordigovernance package one source file belongs to.
+
+    packages/<dist>/src/ordigovernance/<subpackage>/... -> <subpackage>
+    """
+    try:
+        rel = path.relative_to(packages_dir)
+    except ValueError:
+        return None
+    parts = rel.parts
+    if len(parts) >= 4 and parts[1] == "src" and parts[2] == "ordigovernance":
+        return parts[3]
+    return None
 
 
 _STDLIB = set(sys.stdlib_module_names)
@@ -44,8 +87,9 @@ def _top_level(module: str) -> str:
     return module.split(".", 1)[0]
 
 
-def _iter_package_sources():
-    for src_root in sorted(PACKAGES_DIR.glob("*/src")):
+def _iter_package_sources(packages_dir: Path | None = None):
+    root = packages_dir or PACKAGES_DIR
+    for src_root in sorted(root.glob("*/src")):
         package = src_root.parent.name
         for path in sorted(src_root.rglob("*.py")):
             yield package, path
@@ -70,10 +114,14 @@ def _is_internal_api_import(module: str) -> bool:
         or module.startswith("ordigovernance.api.")
 
 
-def check() -> list[str]:
+def check(packages_dir: Path | None = None) -> list[str]:
     findings: list[str] = []
-    for package, path in _iter_package_sources():
-        rel = path.relative_to(ROOT)
+    root = packages_dir or PACKAGES_DIR
+    for package, path in _iter_package_sources(root):
+        try:
+            rel = path.relative_to(ROOT)
+        except ValueError:
+            rel = path
         for module in _imports_of(path):
             top = _top_level(module)
             if top in CLOSED_NAMESPACES:
@@ -86,8 +134,7 @@ def check() -> list[str]:
                     and top not in _STDLIB \
                     and not _is_internal_api_import(module):
                 # api stays free of EXTERNAL third-party deps; only its
-                # own subpackage imports are in
-                # ternal.
+                # own subpackage imports are internal.
                 findings.append(
                     f"{rel}: ordigovernance-api must stay free of external "
                     f"dependencies (found {module!r})")
@@ -99,6 +146,24 @@ def check() -> list[str]:
                 findings.append(
                     f"{rel}: ordigovernance-testing may only import stdlib, "
                     f"ordigovernance.* and orditect.* (found {module!r})")
+        # Rule 5: private names are package-internal; cross-package
+        # contracts are public names only.
+        source_sub = _subpackage_of(path, root)
+        if source_sub is not None:
+            for module, names in _from_imports_of(path):
+                top = _top_level(module)
+                if top not in _PRIVATE_NAMESPACES:
+                    continue
+                if top == "ordigovernance":
+                    parts = module.split(".")
+                    target_sub = parts[1] if len(parts) > 1 else None
+                    if target_sub is None or target_sub == source_sub:
+                        continue
+                private = [n for n in names if n.startswith("_")]
+                if private:
+                    findings.append(
+                        f"{rel}: imports private name(s) {private} from "
+                        f"{module!r} across the package boundary")
     return findings
 
 def main() -> int:

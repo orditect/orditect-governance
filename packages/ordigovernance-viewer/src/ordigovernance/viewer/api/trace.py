@@ -7,12 +7,12 @@ free of side effects on any running workflow.
 resolve_reader(run_id) must 404 unknown runs (the caller owns run-id
 validation policy, including the active-run special case).
 
-Pin reconciliation is opt-in: pass reconcile_fn (a callable taking
-(backend, lines, *, task_id, eid) and returning a report object with
-.available and .findings; each finding carries .kind, .target_task_id,
-.declared_eid, .actual_eid) to compare declared pins against actual
-archive-read traffic and surface DR-PIN-* warnings. Without it the
-validate endpoint returns run_rules findings only.
+Pin reconciliation is opt-in: pass reconcile_fn, a callable matching
+ordigovernance.api.ReconcileFnProtocol (takes (backend, lines, *,
+task_id, eid), returns a ReconcileReportShape), to compare declared
+pins against actual archive-read traffic and surface DR-PIN-*
+warnings. Without it the validate endpoint returns run_rules findings
+only.
 """
 
 from __future__ import annotations
@@ -22,9 +22,8 @@ from typing import Any, Awaitable, Callable
 
 from fastapi import APIRouter, HTTPException
 
+from ordigovernance.api.context import ReconcileFnProtocol
 from ordigovernance.runtime.lifecycle.event_bus import jsonable
-
-ReconcileFn = Callable[..., Awaitable[Any]]
 
 
 def build_trace_router(
@@ -32,7 +31,7 @@ def build_trace_router(
     *,
     resolve_trace_dir=None,
     resolve_archive_backend=None,
-    reconcile_fn: ReconcileFn | None = None,
+    reconcile_fn: ReconcileFnProtocol | None = None,
     prefix: str = "/api/runs/{run_id}",
     tags: list[str] | None = None,
 ) -> APIRouter:

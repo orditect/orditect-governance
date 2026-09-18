@@ -21,3 +21,8 @@ __all__ = [
     "find_active_pin_consumers",
     "raise_if_cancelled",
 ]
+from ordigovernance.runtime.orchestration.orphan_guard import (
+    find_active_pin_consumers,
+)
+
+__all__ += ["find_active_pin_consumers"]

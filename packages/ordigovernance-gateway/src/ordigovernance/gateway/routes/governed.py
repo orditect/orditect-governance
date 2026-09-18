@@ -19,6 +19,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 
 from ordigovernance.api.naming import make_call_id
+from ordigovernance.api.tools import check_reserved_payload_keys
 
 from ordigovernance.gateway.schemas import (
     LlmChatRequest,
@@ -104,10 +105,6 @@ def build_governed_router(
                 status_code=404,
                 detail=f"unknown task {req.task_id!r} in run "
                        f"{session.run_id!r}") from None
-        from ordigovernance.gateway.session import (
-            check_reserved_payload_keys,
-        )
-
         try:
             check_reserved_payload_keys(req.tool, req.inputs)
         except ValueError as e:

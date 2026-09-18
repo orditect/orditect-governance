@@ -12,6 +12,7 @@ FAILED=()
 PASSED=()
 
 SUITES=(
+    "packages/ordigovernance-api/tests"
     "packages/ordigovernance-runtime/tests"
     "packages/ordigovernance-viewer/tests"
     "packages/ordigovernance-testing/tests"

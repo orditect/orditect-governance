@@ -125,7 +125,14 @@ class AgentContext:
 
     async def llm_call(self, client: str, purpose: str, seq: int,
                        messages: list[dict], **kwargs: Any) -> dict:
-        """Direct governed LLM call (no memo), current-generation id."""
+        """Direct governed LLM call (no memo), current-generation id.
+
+        llm_params from the replay channel (e.g. temperature/seed) are
+        merged over the call kwargs: they belong to the experiment
+        declaration, not to the business call site. The merge order is
+        part of the api contract — engine tiers must preserve
+        {**call_kwargs, **llm_params}.
+        """
         merged = {**kwargs, **self._llm_params}
         return await self.llm(client).chat(
             messages=messages, call_id=self.call_id(purpose, seq), **merged
@@ -163,6 +170,47 @@ class AgentContext:
     def policy_resolver(self) -> PolicyResolverProtocol:
         """The generation's policy resolver (shared by all call paths)."""
         return self._resolver
+
+    # ---- public read surface for engine components -------------------------
+
+    @property
+    def memo_scope(self) -> str:
+        """The generation's memo scope (the run-scoped namespace)."""
+        return self._memo_scope
+
+    @property
+    def memo_backend(self) -> MemoBackend | None:
+        """The backend backing the memo/archive content layer.
+
+        Engine components (nested intervals, engine tracked atoms)
+        build their own memo layers over this backend; None in
+        ungoverned setups.
+        """
+        return self._archive_backend
+
+    @property
+    def llm_registry(self) -> dict[str, LLMChatProtocol]:
+        """Read-only view of the B-class client registry (a copy)."""
+        return dict(self._llms)
+
+    @property
+    def has_memo_layer(self) -> bool:
+        """Whether a memo engine is injected for this generation.
+
+        Engine-aware components check this and fail with guidance
+        (require_memo_layer) instead of an AttributeError frames away.
+        """
+        return self._memo is not None
+
+    def require_memo_layer(self, feature: str) -> MemoLayerProtocol:
+        """Return the memo layer, or raise with engine-tier guidance."""
+        if self._memo is None:
+            raise RuntimeError(
+                f"{feature} requires an injected memo layer "
+                f"(MemoLayerProtocol via GovernedAgent's "
+                f"memo_layer_factory); the passthrough tier has none"
+            )
+        return self._memo
 
     async def memoize(
             self,

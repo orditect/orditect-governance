@@ -60,6 +60,35 @@ def test_call_identity_for_unknown_task_is_key_error(settings):
         _run(manager.shutdown())
 
 
+def test_ambient_ownership_is_catch_all_but_existing_only(settings):
+    """Ambient attributes run-less traffic to any existing record.
+
+    That is the one documented ownership exemption (D2); a task_id
+    with no hot record is a 404 there too, so the catch-all never
+    fabricates identities.
+    """
+    manager = _run(_startup(settings))
+    try:
+        user_run = _run(manager.start_user_run("run-1"))
+        try:
+            record = _run(manager.hot["storage"].get_task(
+                user_run.root_id))
+            assert record
+            ambient = manager.ambient
+            # Another run's existing record: attributed (D2 catch-all).
+            _, eid, _ = _run(ambient.allocate_call_identity(
+                user_run.root_id, "p"))
+            assert eid == record["execution_id"]
+            # A task id with no hot record anywhere: still a 404.
+            with pytest.raises(KeyError):
+                _run(ambient.allocate_call_identity("ghost-nowhere",
+                                                    "p"))
+        finally:
+            _run(manager.finish_user_run("run-1", "succeeded"))
+    finally:
+        _run(manager.shutdown())
+
+
 def test_call_identity_mints_ephemeral_and_monotonic_seqs(settings):
     manager = _run(_startup(settings))
     try:

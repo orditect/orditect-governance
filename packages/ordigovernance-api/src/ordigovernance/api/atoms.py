@@ -44,5 +44,13 @@ class TrackedToolSetProtocol(Protocol):
         record_origin: bool = True,
         **kwargs: Any,
     ) -> Any:
-        """One governed tool call (memo-wrapped behind engine layers)."""
+        """One governed tool call (memo-wrapped behind engine layers).
+
+        inputs: the memo-key payload (defaults to kwargs).
+        reuse:  mechanism vocabulary on the passthrough tier
+                ("always"/"never" both execute; "never" is the
+                producer alias); engine tiers give the modes their
+                routing semantics.
+        record_origin: when False, the call skips the origins record.
+        """
         ...

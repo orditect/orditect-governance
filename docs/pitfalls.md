@@ -583,7 +583,8 @@ test_retry_receipt_is_served_for_direct_actions.
 ### 16.9 accepted != executed when the dispatcher is dead (framework-level hazard)
 Field incident: a pause settled the task cancelled; two resumes then
 returned accepted=true and no generation ever reran; the receipt
-endpoint later 404'd (run finished). The action queue was dead
+endpoint later 404'd (run finished). The action qu
+eue was dead
 while the run still looked active -- pitfall 13.6's shape one layer
 down. The route-level guard (404 on non-active runs) cannot see a
 dead dispatcher inside a live session, and the sink's accepted flag
@@ -593,3 +594,101 @@ treat accepted as evidence; poll the receipt AND the record (the
 n8n node's waitForReceipt + awaitDecision shape). Detection recipe:
 receipt never arrives AND prevs unchanged after the expected
 latency -> the dispatcher is dead; finish and restart the run.
+
+## 17. Open-tier split contract lessons
+
+### 17.1 Never hand a bare module where a MemoBackend is expected
+The quickstart generation router received the mock memory MODULE as
+its backend; the router speaks the MemoBackend protocol (keyword
+call_id, payload_fn), and every generation-content read would have
+TypeError'd — invisible because no test hit the HTTP surface. Rule:
+handler-shaped fixtures go through an adapter
+(testing.mock_backend.HandlerBackendAdapter), and demo HTTP surfaces
+need TestClient coverage, not only execution coverage. Locked by
+packages/ordigovernance-viewer/tests/test_quickstart_http.py.
+
+### 17.2 Shared plumbing vocabulary lives in the api package
+The reserved payload-key list started life as a private constant in
+runtime.atoms and was imported by the gateway via an end-of-file
+private import (three layers of wrong: private name, cross-package,
+not in __all__). Anything two packages both need is vocabulary, not
+implementation: it moves to ordigovernance.api.tools
+(RESERVED_PAYLOAD_KEYS / check_reserved_payload_keys). Locked by
+packages/ordigovernance-api/tests/test_reserved.py.
+
+### 17.3 Optional extras need guarded imports with install guidance
+Gateway memory mode imported the testing fixtures bare; without the
+[memory] extra the failure was a ModuleNotFoundError frames away from
+the cause. Optional dependency imports fail with a RuntimeError
+naming the exact pip extra to install.
+
+### 17.4 Package extras must match the code's real imports
+The viewer's [quickstart] extra declared orditect-adapter-memory
+while the code imports orditect.adapter.local; it only worked because
+the runtime's dependencies pulled it transitively. When declaring an
+extra, derive it from the module's actual imports, not from memory.
+
+### 17.5 Watch for duplicated imports after mechanical splits
+File-split migrations leave stray duplicates (a second
+`import logging` mid-file in gateway/session.py; the legacy monorepo
+top-level __init__ re-imported the same tools twice). Re-read every
+__init__ and long module after a split; the import boundary gate
+catches layering, not duplication.
+
+### 17.6 Engine components consume a public surface, never private fields
+The closed tier's nested context originally read the parent context's
+private fields (parent._memo._scope/_backend, parent._llms,
+parent._resolver). Private reads break silently on any internal
+refactor and fail with AttributeError on the passthrough tier
+(parent._memo is None there). Rule: AgentContext exposes a public
+read surface (memo_scope / memo_backend / llm_registry /
+has_memo_layer / require_memo_layer); engine components go through
+it, and memo-dependent components call require_memo_layer so the
+passthrough tier fails with guidance naming the injection point.
+Locked by
+packages/ordigovernance-runtime/tests/test_context_public_surface.py.
+
+### 17.7 Hot-path fixtures drift against the framework they mirror
+The in-memory hot path (MemoryTaskStorage / MemoryQuota /
+MemoryLimiterRegistry) mirrors orditect contracts the framework owns:
+reopen semantics, initialize-vs-schedule divergence, lease tokens,
+quota responses. Pitfall 14.8 already cost one production-side fix
+(reopen chains died at re-initialize, not at reopen). Discipline: on
+every orditect framework upgrade, the fixture semantic assertions run
+against BOTH the in-memory fixtures and the real redis adapters
+(manual or nightly job, never a PR gate) before the upgrade lands;
+fixture drift is a bug class, not a test convenience.
+
+### 17.8 Import gates must cover private names, not only namespaces
+The boundary gate originally checked only top-level namespaces; the
+gateway still smuggled a private constant out of runtime.atoms via an
+end-of-file private import (fixed in batch 1). Namespaces alone do
+not express the contract: cross-package contracts are PUBLIC names.
+Rule 5 of scripts/check_import_boundary.py flags underscore-prefixed
+imports across the top-level ordigovernance package boundary and from
+the orditect framework. Locked by
+packages/ordigovernance-testing/tests/test_import_boundary.py.
+
+### 17.9 Ambient is the ONE documented ownership exemption; user runs stay strict
+Two ownership rules were tried and one was wrong: exempting ambient
+from all checks let run-less traffic fabricate nothing but still
+attribute silently to any run's record with no design record; making
+ambient strict like user runs broke D2 (the catch-all bucket for
+run-less traffic must attribute to EXISTING records, which is its
+only purpose). The settled rule: user runs enforce descriptor/root
+ownership (16.7); ambient attributes run-less traffic to any existing
+hot record and 404s on task ids without one. Evidence mixing is
+bounded: ambient carries no engine semantics, so an attributed call
+never re-executes another run's business path — it only lands in the
+ambient audit trail. Locked by
+packages/ordigovernance-gateway/tests/test_session.py::test_ambient_ownership_is_catch_all_but_existing_only.
+
+### 17.10 Reviewed "computed observability" signals are skipped on purpose
+An early proposal added a passive "duplicate logical call" signal to
+the passthrough memoize path. It was rejected before implementation:
+it archives one computed line per call on the evidence chain for a
+counter nobody consumes, the cheap open-tier answer is `origins`
+post-processing, and the real upgrade path is the engine memo layer
+itself (memoize already delegates). Rule: new evidence shapes need a
+consumer and a test before they exist; proposal-time signals that are
+not free stay proposals.

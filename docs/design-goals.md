@@ -169,6 +169,11 @@ acceptance selfcheck; format drift fails CI on BOTH tiers by design.
    (numbered, with the locking test named).
 5. Public contracts (api package) unchanged, or the change is
    additive and backwards compatible — engines build against them.
+6. When the orditect framework version changes, the hot-path fixtures
+   are re-verified against the real adapters (the fixture parity
+   check): the same semantic assertions run over the in-memory
+   fixtures and over redis before the upgrade lands. Fixture drift is
+   a bug class (docs/pitfalls.md 14.8), not a test convenience.
 
 ## 7. License boundary
 

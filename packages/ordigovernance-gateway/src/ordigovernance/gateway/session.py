@@ -11,6 +11,14 @@ Identity discipline (D8): call-plane requests resolve their
 with no record is a 404, a missing task_id mints an ephemeral
 identity. Seq slots are allocated per (task_id, purpose) starting
 above the agent band, keeping the naming discipline.
+
+Ambient ownership (D2, catch-all): the ambient run attributes
+run-less traffic to any EXISTING hot record -- that is the one
+documented ownership exemption, and its only surface. Evidence
+mixing is bounded to ambient traffic only: ambient carries no
+engine semantics, so an attributed call never re-executes another
+run's business path, it only lands in the ambient audit trail. User
+runs stay strict (descriptor registry or the run root).
 """
 from __future__ import annotations
 
@@ -21,6 +29,7 @@ import uuid
 from typing import Any
 
 from ordigovernance.api.naming import SEQ_AGENT_BASE
+from ordigovernance.api.tools import check_reserved_payload_keys
 from ordigovernance.bridges.direct.context import build_hot_path
 from ordigovernance.bridges.direct.llms import build_client_registry
 from ordigovernance.runtime.agent.governed_agent import GovernedAgent
@@ -41,8 +50,6 @@ from ordigovernance.runtime.tools.governed_tools import GovernedToolSet
 
 from ordigovernance.gateway.memory import DictMemoryBody, RedisMemoryBody
 from ordigovernance.gateway.schemas import TaskDescriptor
-
-import logging
 
 log = logging.getLogger(__name__)
 
@@ -380,8 +387,12 @@ class RunSession:
         task_id must belong to the run (descriptor registry or the
         run root) before its hot record is read -- the hot path is
         shared across runs, so a record existing is not proof of
-        ownership. The ambient run is exempt by design: it is the
-        catch-all attribution bucket for run-less traffic (D2).
+        ownership.
+
+        Ambient discipline (D2, catch-all): the ambient session is the
+        one documented exemption -- run-less traffic may attribute to
+        any EXISTING hot record, and only to an existing one. A
+        task_id with no hot record is a 404 there too.
         """
         if task_id is None:
             task_id = f"n8n-call-{uuid.uuid4().hex[:8]}"
@@ -465,10 +476,19 @@ class SessionManager:
                 lease_time=settings.lease_time)
             self.memory_body = RedisMemoryBody(self.hot["redis_client"])
         else:
-            from ordigovernance.testing.hot_path import (
-                build_memory_hot_path,
-            )
-
+            try:
+                from ordigovernance.testing.hot_path import (
+                    build_memory_hot_path,
+                )
+            except ModuleNotFoundError:
+                # The testing fixtures are an optional extra; a bare
+                # ModuleNotFoundError would surface frames away from
+                # the cause.
+                raise RuntimeError(
+                    "memory mode (no GATEWAY_REDIS_URL) requires the "
+                    "testing fixtures: pip install "
+                    "ordigovernance-gateway[memory]"
+                ) from None
             self.hot = build_memory_hot_path(dict(settings.semaphores))
             self.memory_body = DictMemoryBody()
         self._registry = registry
@@ -535,17 +555,3 @@ class SessionManager:
             raise KeyError(run_id)
         await self._active.close(final_status)
         self._active = None
-
-from ordigovernance.runtime.atoms import (  # noqa: E402
-    _RESERVED_PAYLOAD_KEYS,
-)
-
-def check_reserved_payload_keys(tool_name: str, inputs: dict) -> None:
-    """Fail loudly when payload keys collide with governed plumbing."""
-    collision = _RESERVED_PAYLOAD_KEYS & set(inputs)
-    if collision:
-        raise ValueError(
-            f"tool {tool_name!r} payload keys {sorted(collision)} collide "
-            f"with the governed call plumbing; rename the tool parameter "
-            f"(reserved: {sorted(_RESERVED_PAYLOAD_KEYS)})"
-        )

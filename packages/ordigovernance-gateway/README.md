@@ -71,9 +71,12 @@ token, V1).
                               -> {status, call_id, result, origin}
 
 No `run_id` routes to the **ambient run** (opened at boot, never
-finished, not counted as the single active run). Given `task_id`, the
-hot record must exist (404 otherwise); omitted, an ephemeral identity
-is minted. call ids always follow the naming discipline; seq slots
+finished, not counted as the single active run). Given `task_id`, it
+must belong to the addressed session (404 otherwise — the hot path is
+process-global, and a record's existence is not proof of ownership).
+The ambient run is the one documented exemption (D2): run-less
+traffic may attribute to any existing hot record, but never to a
+task_id without one. Omitted, an ephemeral identity is minted.call ids always follow the naming discipline; seq slots
 are per (task_id, purpose) starting above the agent band. `origin`
 is `"executed"` on the open tier (memo reuse is an engine concern).
 Errors: unknown vocabulary -> 422 listing valid names; unknown task

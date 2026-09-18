@@ -6,6 +6,23 @@ pointer-ization all apply), just without memo reuse or replay policy
 routing. Engine implementations (memo reuse, policy routing) plug in
 behind the same api protocols at assembly time; bridges and agent code
 never change across tiers.
+
+Invocation contract (api.atoms):
+  - complete(messages, **kwargs): one governed non-streaming call;
+    returns the raw response dict.
+  - stream(messages, **kwargs): one governed streaming call; never
+    memoized (chunk sequences have no stable memo identity).
+  - call(name, *args, inputs=None, reuse="always",
+    record_origin=True, **kwargs): one governed tool call.
+    reuse/record_origin are mechanism vocabulary: "always"/"never" both
+    execute on the passthrough tier (there is no cache to route), and
+    origins record "executed". Engine tiers give the reuse modes their
+    routing semantics.
+
+llm_params merge semantics (api contract, replay channel): params
+declared on the generation context are merged OVER call kwargs
+({**call_kwargs, **llm_params}) — experiment-declared sampling
+parameters belong to the experiment, not to the business call site.
 """
 
 from __future__ import annotations
@@ -14,6 +31,7 @@ from typing import Any
 
 from ordigovernance.api.atoms import TrackedLLMProtocol, TrackedToolSetProtocol
 from ordigovernance.api.naming import SEQ_AGENT_BASE
+from ordigovernance.api.tools import check_reserved_payload_keys
 
 # Payload keys that collide with the governed call plumbing when they
 # travel through **kwargs: silent capture at this signature (inputs /
@@ -76,18 +94,13 @@ class PassthroughTrackedToolSet(TrackedToolSetProtocol):
         """One governed tool call; no memo wrap.
 
         Payload keys travel through **kwargs to the handler, so they
-        must not collide with the governed plumbing (see
-        _RESERVED_PAYLOAD_KEYS); a collision fails loudly here with a
-        rename instruction instead of silently corrupting routing or
-        surfacing as a TypeError frames away from the cause.
+        must not collide with the governed plumbing (the shared
+        RESERVED_PAYLOAD_KEYS list in the api package); a collision
+        fails loudly here with a rename instruction instead of
+        silently corrupting routing or surfacing as a TypeError frames
+        away from the cause.
         """
-        collision = _RESERVED_PAYLOAD_KEYS & set(kwargs)
-        if collision:
-            raise ValueError(
-                f"tool {name!r} payload keys {sorted(collision)} collide "
-                f"with the governed call plumbing; rename the tool "
-                f"parameter (reserved: {sorted(_RESERVED_PAYLOAD_KEYS)})"
-            )
+        check_reserved_payload_keys(name, kwargs)
         self._seq += 1
         result = await self._ctx.tool_call(
             name, *args, purpose=name, seq=self._seq,

@@ -7,6 +7,7 @@ from ordigovernance.testing.conformance import (
     check_memo_envelope,
     check_pinned_by_document,
     check_seq_bands,
+    run_engine_memo_profile,
     run_producer_profile,
 )
 from ordigovernance.testing.golden import (
@@ -27,6 +28,7 @@ from ordigovernance.testing.hot_path import (
     MemoryTaskStorage,
     build_memory_hot_path,
 )
+from ordigovernance.testing.mock_backend import HandlerBackendAdapter
 from ordigovernance.testing.mock_llm import ScriptedLLMClient
 from ordigovernance.testing.mock_tools import (
     configure_memory_body,
@@ -44,6 +46,7 @@ from ordigovernance.testing import mock_tools  # noqa: F401
 __all__ = [
     "BUNDLE_FILES",
     "BUSINESS_VARIANCE_PATTERNS",
+    "HandlerBackendAdapter",
     "MemoryLimiterRegistry",
     "MemoryQuota",
     "MemoryTaskStorage",
@@ -66,6 +69,7 @@ __all__ = [
     "memory_write",
     "mock_tools",
     "normalize_bundle",
+    "run_engine_memo_profile",
     "run_producer_profile",
     "save_golden",
     "summarize",

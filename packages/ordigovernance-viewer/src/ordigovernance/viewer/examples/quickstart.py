@@ -30,6 +30,7 @@ from ordigovernance.runtime.lifecycle.run_context import (
 from ordigovernance.runtime.patterns.fanout import FanOutPattern
 from ordigovernance.runtime.task.governed_task import GenerationMeta
 from ordigovernance.runtime.tools.governed_tools import GovernedToolSet
+from ordigovernance.testing.mock_backend import HandlerBackendAdapter
 from ordigovernance.testing.mock_llm import ScriptedLLMClient
 from ordigovernance.testing import mock_tools
 
@@ -244,8 +245,12 @@ def _build_hot_path() -> dict:
         "memo_store": 2,
     })
 
-async def _serve(trace_dir: Path, port: int) -> None:
-    import uvicorn
+def _build_viewer_app(trace_dir: Path):
+    """Assemble the quickstart viewer app; serving is the caller's job.
+
+    Split out of _serve so tests can drive the HTTP surface through
+    TestClient without a live server.
+    """
     from fastapi import FastAPI
     from fastapi.responses import HTMLResponse
     from fastapi.staticfiles import StaticFiles
@@ -277,8 +282,14 @@ async def _serve(trace_dir: Path, port: int) -> None:
         lambda run_id: _Reader(),
         resolve_trace_dir=lambda run_id: trace_dir,
     ))
+    # The generation-content router speaks the MemoBackend protocol
+    # (keyword call_id, payload_fn, envelope results); the mock memory
+    # handlers are plain callables, so they go through the handler
+    # adapter instead of being handed over bare (a bare module lacks
+    # the keyword surface and every read would TypeError).
     app.include_router(build_generation_router(
-        lambda run_id: mock_tools))
+        lambda run_id: HandlerBackendAdapter(
+            mock_tools.memory_read, mock_tools.memory_write)))
     app.include_router(build_watermark_router(
         get_semaphore_status=lambda: _semaphore_status(),
         get_budget_balance=lambda: _budget_balance(),
@@ -292,6 +303,13 @@ async def _serve(trace_dir: Path, port: int) -> None:
     async def index() -> str:
         return _INDEX_HTML
 
+    return app
+
+
+async def _serve(trace_dir: Path, port: int) -> None:
+    import uvicorn
+
+    app = _build_viewer_app(trace_dir)
     config = uvicorn.Config(app, host="127.0.0.1", port=port,
                             log_level="warning")
     server = uvicorn.Server(config)

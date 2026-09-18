@@ -1,3 +1,23 @@
+## Migration from orditect-components
+
+The open tier is **mechanism-direct by default**: without an injected
+memo engine, every logical call really executes and is really charged
+in every generation — repeated spend is explicit by construction, and
+the quickstart makes it visible. Two consequences when migrating from
+the legacy monorepo:
+
+- A run that previously relied on memo reuse will now re-execute its
+  world reads and LLM calls on every generation; size budgets
+  accordingly (a run with a tight budget cap may now hit the cap).
+- Routing policies (stub / sandbox / allow, llm freeze) are engine
+  semantics: they activate only when an engine is injected via the
+  assembly factories; without one, the passthrough resolver keeps
+  every call site's declared behavior.
+
+The conformance kit and the acceptance ground
+(`examples/acceptance/`) run identically on both tiers; engine
+semantics are verified by the engine tier's own suite.
+
 # examples/gateway_n8n — reference registry + demo environment
 
 Reference deployment for the n8n bridge: a registry the gateway loads
