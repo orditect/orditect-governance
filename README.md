@@ -36,6 +36,12 @@ distributions:
 Naming: the repository is **orditect-governance**, the namespace is
 `ordigovernance`, distributions are named `ordigovernance-*`.
 
+## Ecosystem
+
+| repository | license | contents |
+|---|---|---|
+| [n8n-nodes-ordigovernance](https://github.com/orditect/n8n-nodes-ordigovernance) | MIT | n8n community nodes + credentials for the gateway (pure HTTP client, zero governance imports) |
+
 ## Architecture
 
 ```

@@ -1,5 +1,9 @@
 # n8n Bridge — Design and Decisions
 
+  > The node-side contract summary and HTTP-visible pitfalls live in
+  > the n8n-nodes-ordigovernance repository (docs/gateway-contract.md,
+  > docs/gateway-pitfalls.md).
+
 This document is the design record of the n8n bridge: the frozen
 decisions, the architecture they imply, and the lessons verified
 against real endpoints. Construction progress does not belong here;
