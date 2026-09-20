@@ -54,6 +54,7 @@ from ordigovernance.gateway.schemas import TaskDescriptor
 log = logging.getLogger(__name__)
 
 AMBIENT_RUN_ID = "ambient"
+TERMINAL_WORDS_RUN = frozenset({"succeeded", "failed", "cancelled"})
 
 # Attributes child-task registrations to the driving composite (D10).
 # Set inside the composite's own asyncio task, so concurrent
@@ -97,7 +98,8 @@ class RunSession:
 
     def __init__(self, manager: "SessionManager", run_id: str,
                  registry, *, budget_scope: str, budget_max_units: int,
-                 register: bool) -> None:
+                 register: bool, intent: str | None = None,
+                 metadata: dict | None = None) -> None:
         self.manager = manager
         self.run_id = run_id
         self.root_id = run_id
@@ -105,6 +107,8 @@ class RunSession:
         self.budget_scope = budget_scope
         self.budget_max_units = budget_max_units
         self._register = register
+        self.intent = intent
+        self.metadata = dict(metadata or {})
         self.resources: RunContextResources | None = None
         self.llms: dict = {}
         self.descriptors: dict[str, Any] = {}
@@ -136,7 +140,8 @@ class RunSession:
             self.root_id, initial_status="succeeded")
         if self._register:
             self.manager.runs.register_run(
-                self.run_id, "gateway run", {}, self.budget_scope)
+                self.run_id, self.intent or "gateway run",
+                self.metadata, self.budget_scope)
         log.info("run session open: %s (scope %s)", self.run_id,
                  self.budget_scope)
 
@@ -528,8 +533,15 @@ class SessionManager:
 
     async def start_user_run(
             self, run_id: str | None = None, *,
-            budget_max_units: int | None = None) -> RunSession | None:
-        """Open the single active user run; None when one is active."""
+            budget_max_units: int | None = None,
+            intent: str | None = None,
+            metadata: dict | None = None) -> RunSession | None:
+        """Open the single active user run; None when one is active.
+
+        intent/metadata are business-provenance fields recorded on the
+        registry entry verbatim (D4 additive); the gateway never
+        interprets them.
+        """
         if self._active is not None:
             return None
         run_id = run_id or new_run_id()
@@ -538,7 +550,8 @@ class SessionManager:
             budget_scope=f"{run_id}:{uuid.uuid4().hex[:8]}",
             budget_max_units=(budget_max_units
                               or self.settings.default_budget_max_units),
-            register=True)
+            register=True,
+            intent=intent, metadata=metadata)
         await session.open()
         self._active = session
         return session
@@ -555,3 +568,57 @@ class SessionManager:
             raise KeyError(run_id)
         await self._active.close(final_status)
         self._active = None
+
+    async def cancel_user_run(self, run_id: str,
+                              timeout: float | None = None) -> dict:
+        """Cancel the active run's running tasks, then close it.
+
+        The escape hatch for a wedged run (P0: finish 409s on
+        non-terminal tasks; restarting the gateway kills the
+        dispatcher, which is forbidden mid-run). Requests cancel on
+        every RUNNING task, waits for all tasks to reach a terminal
+        state, then finishes the run as cancelled. Returns a summary
+        dict {cancelled_tasks, final_status}.
+
+        The settle timeout must EXCEED the longest cooperative window
+        with headroom: a task that polls its cancel flag once per
+        slice settles only after its window elapses, so a timeout
+        equal to the window is a guaranteed race (observed: a 30s
+        slow_researcher window vs the old hardcoded 30s -- the task
+        settled at exactly t=30 while the deadline expired). Default:
+        the slowest plausible window (120s) plus poll slack.
+        """
+        if self._active is None or self._active.run_id != run_id:
+            raise KeyError(run_id)
+        session = self._active
+        storage = self.hot["storage"]
+        settle_timeout = timeout if timeout is not None else 150.0
+        cancelled: list[str] = []
+        for tid in session.descriptors:
+            record = await storage.get_task(tid)
+            if record.get("status") == "running":
+                await storage.request_cancel(tid)
+                cancelled.append(tid)
+        # Wait for every task to settle terminally (cooperative
+        # cancel windows abort at their next slice boundary; tasks
+        # that never check the flag run to their natural end first).
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + settle_timeout
+        pending: list[str] = []
+        while loop.time() < deadline:
+            pending = []
+            for tid in session.descriptors:
+                record = await storage.get_task(tid)
+                if record.get("status") not in TERMINAL_WORDS_RUN:
+                    pending.append(tid)
+            if not pending:
+                break
+            await asyncio.sleep(0.2)
+        else:
+            raise TimeoutError(
+                f"run {run_id!r} tasks did not settle after cancel "
+                f"within {settle_timeout}s: {pending}")
+        final_status = "cancelled"
+        await session.close(final_status)
+        self._active = None
+        return {"cancelled_tasks": cancelled, "final_status": final_status}

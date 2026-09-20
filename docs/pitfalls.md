@@ -692,3 +692,66 @@ post-processing, and the real upgrade path is the engine memo layer
 itself (memoize already delegates). Rule: new evidence shapes need a
 consumer and a test before they exist; proposal-time signals that are
 not free stay proposals.
+
+## 18. Gateway live-acceptance lessons (n8n bridge bring-up)
+
+### 18.1 Wire-contract drift is silent AND self-concealing
+The n8n Run/Tool nodes sent client/purpose/metadata bodies the
+gateway schema never declared; pydantic dropped them silently, so
+three node parameters were decorative and budget_max_units was
+unreachable -- for MONTHS, with every node-side test green, because
+the mocks encoded the same wrong contract as the nodes. The fix is
+two-sided: schema-alignment regression locks in the consumer's
+suite, plus a gateway-side wire-contract mirror
+(test_node_wire_contract.py) that extracts every request schema's
+field set from the app's own openapi. Rule: any HTTP consumer built
+against the gateway must pin the openapi in CI on BOTH sides; the
+openapi is the only contract truth. (Node-side pitfall 16 is the
+same lesson from the consumer view.)
+
+### 18.2 A wedged run needs a cancel primitive, not a restart
+finish 409s on non-terminal tasks BY DESIGN (D5), and restarting
+the gateway mid-run kills the dispatcher (16.9). Before
+POST /runs/{id}/cancel existed, a run containing one stuck task had
+NO exit path at all -- the single-active guard then blocked every
+future run in the deployment. Rule: any single-active-resource
+design must ship a force-release primitive in the same release as
+the guard; a lock without a key is an outage waiting for a
+schedule.
+
+### 18.3 Budget denial surfaces at execution time, not submit time
+Task submission returns accepted even under a budget that can never
+cover the run: the admission check runs when each governed call
+reserves units, and the ledger is POST-CHARGE (13.11) -- a call
+whose check passes on a still-positive balance executes and may
+overdraw the ledger ("the last call overspends honestly"); every
+call AFTER the overdraft blocks before acquiring a slot and leaves
+NO audit row. Live-verified signature, all three together (pinned
+by test_budget_denial.py): (1) the task settles failed with
+result: null while the audit stream shows the EXECUTED calls,
+including the overdrawn LLM call; (2) the first post-overdraft call
+(the archive write) is absent from the audit stream -- no memsave
+row; (3) a direct call-plane request answers 409 admission denied
+BudgetExhaustedError carrying the full ledger state (scope,
+max_units, negative balance). Diagnosing a "failed task, result
+null" therefore starts at the audit stream's MISSING rows (the
+calls after the overdraft), never at the impl. Field note: an
+audit query FILTERED by the task id also hides the LLM rows (they
+carry the client registry's task id, not the task's) -- read the
+whole run stream before concluding a call never happened.
+
+### 18.4 Cooperative-cancel settle timeouts race the task window
+The first cancel_user_run waited a hardcoded 30s for tasks to
+settle; a slow_researcher with a 30s cooperative window settled at
+exactly t=30 while the deadline expired --
+a zero-slack race that
+reproduced deterministically. Two lessons compound: (a) the settle
+timeout must EXCEED the slowest plausible task window with slack
+(now 150s default, caller-overridable) -- a timeout equal to the
+window is a guaranteed race against any task that polls its flag
+once per slice; (b) HTTP consumers of cancel need their own
+transport budget above the shared default (the node's 30s abort
+killed the request mid-settlement, leaving the task cancelled but
+the run still active -- a half-applied cancel is its own confusing
+state). Same lesson class as 14.6: every wait needs a timeout that
+reflects what it is waiting FOR.

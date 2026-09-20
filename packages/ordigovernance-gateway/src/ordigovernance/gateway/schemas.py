@@ -49,6 +49,16 @@ class ToolCallResponse(BaseModel):
 class StartRunRequest(BaseModel):
     run_id: str | None = None
     budget_max_units: int | None = None
+    # Business metadata recorded on the registry entry (node-side
+    # intent provenance; the gateway never interprets these fields).
+    intent: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunCancelResponse(BaseModel):
+    run_id: str
+    status: str
+    cancelled_tasks: list[str] = Field(default_factory=list)
 
 
 class StartRunResponse(BaseModel):

@@ -1,10 +1,20 @@
 """Minimal cold-path viewer host over the gateway demo's trace root.
 
-Serves the viewer's trace router (tree / generations / graph / audit /
-stats / validate) plus a run listing, pointed at the SAME trace_root
-the gateway writes into. Read-only discipline: the viewer never
-touches the hot path -- the gateway is the WRITE path, this host is
-the READ path (evidence).
+Serves the viewer routers pointed at the SAME trace_root the gateway
+writes into, plus a run listing:
+
+  - build_trace_router       tree / generations / graph / audit /
+                             stats / validate
+  - build_generation_router  per-generation archived result + pins
+                             (the lineage-walk read the Evidence node
+                             consumes)
+  - build_watermark_router   semaphore usage + budget balance (SSE;
+                             the Evidence node reads one-shot via its
+                             HTTP Request fallback, the browser can
+                             stream it)
+
+Read-only discipline: the viewer never touches the hot path -- the
+gateway is the WRITE path, this host is the READ path (evidence).
 
 Run:
     GATEWAY_TRACE_ROOT=data/gateway-runs \
@@ -20,7 +30,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
 from orditect.adapter.local import LocalFileStore
 
+from ordigovernance.viewer.api.generation import build_generation_router
 from ordigovernance.viewer.api.trace import build_trace_router
+from ordigovernance.viewer.api.watermark import build_watermark_router
 
 
 def build_viewer_app(trace_root: Path) -> FastAPI:
@@ -38,9 +50,69 @@ def build_viewer_app(trace_root: Path) -> FastAPI:
     def resolve_reader(run_id: str):
         return LocalFileStore(resolve_trace_dir(run_id))
 
+    def resolve_backend(run_id: str):
+        """MemoBackend over the gateway's shared memory body.
+
+        The gateway writes memo/archive traffic through
+        GatewaySettings-driven handlers (redis hash or process dict).
+        This demo host mirrors the same backend so generation-content
+        reads resolve the exact keys the gateway's governed calls
+        wrote. Deployments with a redis gateway should point this at
+        the same redis body.
+        """
+        from ordigovernance.gateway.memory import RedisMemoryBody
+
+        url = os.environ.get("GATEWAY_REDIS_URL") or os.environ.get(
+            "REDIS_URL")
+        if not url:
+            raise HTTPException(
+                status_code=501,
+                detail="generation-content reads require a redis-backed "
+                       "gateway body (set GATEWAY_REDIS_URL); the "
+                       "in-memory body lives inside the gateway process "
+                       "and is invisible to this host")
+        import redis.asyncio as aioredis
+
+        client = aioredis.from_url(url, decode_responses=True)
+
+        class _Backend:
+            def __init__(self, body):
+                self._body = body
+
+            async def memory_read(self, key, *, call_id, payload_fn=None):
+                return await self._body.read(key)
+
+            async def memory_write(self, key, value, *, call_id,
+                                   payload_fn=None):
+                return await self._body.write(key, value)
+
+        return _Backend(RedisMemoryBody(client))
+
     app = FastAPI(title="ordigovernance gateway demo viewer")
     app.include_router(build_trace_router(
         resolve_reader, resolve_trace_dir=resolve_trace_dir))
+    app.include_router(build_generation_router(resolve_backend))
+
+    def _semaphore_status():
+        return []
+
+    async def _budget_balance():
+        return None
+
+    # The watermark reads the gateway's live registry, which lives in
+    # the gateway process. This host serves an empty shell so the
+    # route shape exists; the real water levels are read from the
+    # gateway itself in production deployments (or via the compose
+    # stack where both share the process). Kept honest: no fabricated
+    # numbers, the stream reports an explicit marker instead.
+    async def _unavailable_marker():
+        return [{"name": "gateway-side", "usage": "?", "limit": 0,
+                 "utilization": "?"}]
+
+    app.include_router(build_watermark_router(
+        get_semaphore_status=_unavailable_marker,
+        get_budget_balance=_budget_balance,
+    ))
 
     @app.get("/api/runs")
     async def list_runs() -> list[dict]:

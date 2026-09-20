@@ -65,7 +65,8 @@ def build_runs_router(
     @router.post("", status_code=201)
     async def start_run(req: StartRunRequest) -> StartRunResponse:
         session = await get_manager().start_user_run(
-            req.run_id, budget_max_units=req.budget_max_units)
+            req.run_id, budget_max_units=req.budget_max_units,
+            intent=req.intent, metadata=req.metadata)
         if session is None:
             active = get_manager().active
             raise HTTPException(
@@ -144,6 +145,13 @@ def build_runs_router(
 
     @router.post("/{run_id}/finish")
     async def finish_run(run_id: str) -> FinishRunResponse:
+        """Close the active run; the gateway derives final_status.
+
+        No request body: final_status is computed from the registered
+        tasks' terminal statuses (all succeeded -> succeeded, else
+        finished_with_errors). The client-provided status is never
+        trusted as evidence.
+        """
         manager = get_manager()
         session = _active_session(run_id)
         statuses: dict[str, str | None] = {}
@@ -169,6 +177,31 @@ def build_runs_router(
                 status_code=404, detail=f"run {run_id!r} is not active"
             ) from None
         return FinishRunResponse(run_id=run_id, final_status=final_status)
+
+    @router.post("/{run_id}/cancel")
+    async def cancel_run(run_id: str) -> dict:
+        """Force-cancel the active run's running tasks and close it.
+
+        The escape hatch for a wedged run: requests cooperative cancel
+        on every RUNNING task, waits for terminal settlement, then
+        closes the run as cancelled. 409 impossible (no non-terminal
+        check); dispatcher stays alive throughout.
+        """
+        manager = get_manager()
+        session = _active_session(run_id)
+        try:
+            summary = await manager.cancel_user_run(run_id)
+        except KeyError:
+            raise HTTPException(
+                status_code=404, detail=f"run {run_id!r} is not active"
+            ) from None
+        except TimeoutError as e:
+            raise HTTPException(status_code=409, detail=str(e)) from None
+        return {
+            "run_id": session.run_id,
+            "status": summary["final_status"],
+            "cancelled_tasks": summary["cancelled_tasks"],
+        }
 
     @router.get("/{run_id}/vocabulary")
     async def vocabulary(run_id: str) -> VocabularyResponse:

@@ -61,6 +61,11 @@ Services:
 
 Smoke: `curl http://localhost:8180/healthz`
 
+## Dev stack without docker
+
+    scripts/dev-stack.sh    # gateway :8180 + viewer :8181 + n8n :5678,
+                            # one terminal each, with a readiness probe
+
 ## Walkthrough (curl; the n8n nodes automate the same calls)
 
     TOKEN=<your GATEWAY_AUTH_TOKEN>

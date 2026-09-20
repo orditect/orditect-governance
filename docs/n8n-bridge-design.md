@@ -44,6 +44,9 @@ These decisions are closed. Changing them requires design review.
 | D12 | client assembly seam | settings exposes `make_clients`: the default assembles the real GovernedLLMClient registry, tests inject scripted clients (gateway tests never need a real endpoint) |
 | D13 | memo body default | The gateway ships its own memory_read/write pair: redis-backed in redis mode, process-dict in memory mode; both overridable. Production paths never run on test fixtures |
 | D14 | historical reads | The gateway serves hot reads of the ACTIVE run only; historical evidence is the viewer's job over the shared `trace_root`. No history endpoints on the gateway |
+| D15 | run cancel | `POST /runs/{id}/cancel` (no body): cooperative-cancel every RUNNING task, wait for terminal settlement (settle timeout defaults to 150s -- it must exceed the slowest task window with slack, see pitfalls 18.4), then close the run as cancelled. The escape hatch for wedged runs (finish 409s on non-terminal tasks; a gateway restart kills the dispatcher, pitfalls 16.9). The node-side Cancel operation and conflict recovery route through it |
+| D16 | run provenance | `StartRunRequest` carries optional `intent` / `metadata`, recorded verbatim on the registry entry (business provenance; the gateway never interprets them). Additive to D4 |
+| D17 | streaming | `POST /governed/llm-chat-stream`: same body as llm-chat, SSE frames `{delta\|done\|error}`; the done frame carries `call_id` + `usage` (include_usage forced on). Serves the node shell's token-level `_astream`; 422 with guidance when the client has no `stream()` |
 
 ## 2. Architecture
 
@@ -155,6 +158,20 @@ Key properties:
    the D5 409. Clients either wait for the terminal record or scope
    their actions accordingly (RELEASE-SMOKE documents the verified
    choreography).
+9. **Field-level contract drift ships silently.** The n8n Run/Tool nodes once sent `client`/`purpose`/`metadata` bodies the gateway schema never declared; pydantic dropped them, three node parameters were decorative and the budget cap was unreachable -- with every node test green, because the mocks encoded the same wrong contract. Fix on both sides: schema-alignment regression locks in the node suite, plus a gateway-side wire-contract mirror (`test_node_wire_contract.py`) that extracts the request schemas' field sets from the app's own openapi, so a schema edit that would drop node fields fails the gateway build first.
+10. **SourceChunk objects must be field-extracted, never repr'd.**
+    The real governed client streams orditect SourceChunk objects,
+    not dicts; the SSE endpoint's first chunk parser hit its
+    non-dict fallback and shipped the object REPR in every text
+    field (discovered only in live acceptance -- the scripted test
+    client yields dicts). The parser now probes text/thinking
+    attributes (duck-typed), maps thinking to the reasoning channel,
+    and the TERMINAL marker chunk (both fields None, finish=True)
+    emits no frame at all. Two meta-lessons: scripted test clients
+    should mirror the real client's chunk TYPES, not just their dict
+    shapes; and every fallback branch in a wire serializer deserves
+    a "what does this do to the consumer" second look (a repr in a
+    text field is valid JSON and fails no test).
 
 ## 5. Verification assets
 
