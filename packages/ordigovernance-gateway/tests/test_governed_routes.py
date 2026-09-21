@@ -20,7 +20,7 @@ def test_llm_chat_lands_in_ambient_with_naming_discipline(client,
     body = resp.json()
 
     assert body["status"] == "ok"
-    assert body["call_id"].startswith("n8n-chat-n8n-call-")
+    assert body["call_id"].startswith("remote-chat-remote-call-")
     assert body["usage"]["total_tokens"] > 0
 
     # The audit row must carry the same call id (naming discipline).
@@ -32,7 +32,6 @@ def test_llm_chat_lands_in_ambient_with_naming_discipline(client,
             if x.strip()]
     data = rows[0].get("data", rows[0])
     assert data["event_id"] == body["call_id"]
-
 
 def test_llm_chat_unknown_client_lists_vocabulary(client, auth_headers):
     resp = client.post("/governed/llm-chat",
@@ -73,7 +72,7 @@ def test_tool_call_executes_and_reports_origin(settings, auth_headers):
     body = resp.json()
     assert body["origin"] == "executed"
     assert body["result"]["query"] == "ev"
-    assert body["call_id"].startswith("search-n8n-call-")
+    assert body["call_id"].startswith("search-remote-call-")
 
 
 async def _search_handler(query: str) -> dict:

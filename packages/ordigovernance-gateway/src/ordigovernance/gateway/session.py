@@ -400,7 +400,7 @@ class RunSession:
         task_id with no hot record is a 404 there too.
         """
         if task_id is None:
-            task_id = f"n8n-call-{uuid.uuid4().hex[:8]}"
+            task_id = f"remote-call-{uuid.uuid4().hex[:8]}"
             eid = f"e-{uuid.uuid4().hex[:8]}"
         else:
             if (self.run_id != AMBIENT_RUN_ID

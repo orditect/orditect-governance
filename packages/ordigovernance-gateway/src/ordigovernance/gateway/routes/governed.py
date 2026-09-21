@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -32,54 +33,105 @@ from ordigovernance.gateway.schemas import (
 
 log = logging.getLogger(__name__)
 
-def _chunk_fields(chunk: Any) -> tuple[str, str, dict | None]:
-    """(text, reasoning, usage) extracted from one raw stream chunk.
 
-    Tolerates the shapes a governed client may forward: plain
-    {"delta": str}, OpenAI-shaped deltas ({"delta": {...}} or
-    {"choices": [{"delta": {...}}]}), the include_usage tail chunk
-    ({"choices": [], "usage": {...}}), and the orditect framework's
-    SourceChunk objects (attribute access: text / thinking).
+@dataclass
+class StreamChunkData:
+    """Fields extracted from one raw governed-client stream chunk.
+
+    Opened for the /v1 OpenAI-compat surface: tool_calls deltas and
+    finish_reason must pass through for streaming tool-calling rounds.
+    """
+
+    text: str
+    reasoning: str
+    tool_calls: list | None = None
+    finish_reason: str | None = None
+    usage: dict | None = None
+
+
+def _delta_tool_calls(delta: dict) -> list | None:
+    """tool_calls entries of one OpenAI-shaped delta, when present."""
+    calls = delta.get("tool_calls")
+    return calls if isinstance(calls, list) else None
+
+
+def parse_stream_chunk(chunk: Any) -> StreamChunkData:
+    """Parse one raw stream chunk a governed client may forward.
+
+    Tolerates the observed shapes: plain {"delta": str}, OpenAI-shaped
+    deltas ({"delta": {...}} or {"choices": [{"delta": {...}}]}), the
+    include_usage tail chunk ({"choices": [], "usage": {...}}), and the
+    orditect framework's SourceChunk objects (attribute access:
+    text / thinking; the terminal marker chunk reads as empty).
     """
     if isinstance(chunk, dict):
         usage = (chunk.get("usage")
                  if isinstance(chunk.get("usage"), dict) else None)
         delta = chunk.get("delta")
         if isinstance(delta, str):
-            return delta, "", usage
+            return StreamChunkData(text=delta, reasoning="", usage=usage)
         if isinstance(delta, dict):
             reasoning = (delta.get("reasoning_content")
                          or delta.get("reasoning") or "")
-            return delta.get("content") or "", reasoning, usage
+            return StreamChunkData(
+                text=delta.get("content") or "",
+                reasoning=reasoning,
+                tool_calls=_delta_tool_calls(delta),
+                usage=usage,
+            )
         choices = chunk.get("choices") or []
         if choices:
-            inner = (choices[0] or {}).get("delta") or {}
+            first = choices[0] or {}
+            inner = first.get("delta") or {}
             if isinstance(inner, dict):
                 reasoning = (inner.get("reasoning_content")
                              or inner.get("reasoning") or "")
-                return inner.get("content") or "", reasoning, usage
-        return "", "", usage
+                return StreamChunkData(
+                    text=inner.get("content") or "",
+                    reasoning=reasoning,
+                    tool_calls=_delta_tool_calls(inner),
+                    finish_reason=first.get("finish_reason"),
+                    usage=usage,
+                )
+        return StreamChunkData(text="", reasoning="", usage=usage)
     if isinstance(chunk, str):
-        return chunk, "", None
+        return StreamChunkData(text=chunk, reasoning="")
     # orditect SourceChunk (and any duck-typed equivalent): text is the
-    # content delta, thinking is the reasoning delta, and the TERMINAL
-    # marker chunk carries None on both (finish=True) -- every field
-    # non-str reads as empty so the terminal chunk emits no frame,
-    # never the object repr.
+    # content delta, thinking is the reasoning delta; the TERMINAL
+    # marker chunk carries None on both (finish=True) and reads empty.
     if hasattr(chunk, "text") or hasattr(chunk, "thinking"):
         text = getattr(chunk, "text", None)
         thinking = getattr(chunk, "thinking", None)
-        if not isinstance(text, str):
-            text = ""
-        if not isinstance(thinking, str):
-            thinking = ""
-        return text, thinking, None
-    return str(chunk), "", None
+        return StreamChunkData(
+            text=text if isinstance(text, str) else "",
+            reasoning=thinking if isinstance(thinking, str) else "",
+        )
+    return StreamChunkData(text=str(chunk), reasoning="")
+
+
+def translate_call_failure(e: Exception):
+    """Uniform governed-call failure translation (shared surfaces).
+
+    Module-level so the /v1 OpenAI-compat surface reuses the exact
+    same timeout / quota / vocabulary verdicts.
+    """
+    text = f"{type(e).__name__}: {e}"
+    lowered = text.lower()
+    if isinstance(e, asyncio.TimeoutError) or "timed out" in lowered:
+        return HTTPException(
+            status_code=504,
+            detail=f"governed call exceeded step timeout: {text}")
+    if "limit" in lowered or "quota" in lowered or "budget" in lowered:
+        return HTTPException(
+            status_code=409,
+            detail=f"admission denied (budget or quota): {text}")
+    return HTTPException(status_code=500, detail=text)
 
 
 def _sse_frame(payload: dict) -> str:
     """One SSE frame: a single JSON object on a data: line."""
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
 
 def build_governed_router(
     get_manager,
@@ -100,19 +152,6 @@ def build_governed_router(
             raise HTTPException(
                 status_code=404, detail=f"unknown run {e.args[0]!r}"
             ) from None
-
-    def _translate_failure(e: Exception):
-        text = f"{type(e).__name__}: {e}"
-        lowered = text.lower()
-        if isinstance(e, asyncio.TimeoutError) or "timed out" in lowered:
-            return HTTPException(
-                status_code=504,
-                detail=f"governed call exceeded step timeout: {text}")
-        if "limit" in lowered or "quota" in lowered or "budget" in lowered:
-            return HTTPException(
-                status_code=409,
-                detail=f"admission denied (budget or quota): {text}")
-        return HTTPException(status_code=500, detail=text)
 
     @router.post("/llm-chat")
     async def llm_chat(req: LlmChatRequest) -> LlmChatResponse:
@@ -139,7 +178,7 @@ def build_governed_router(
                 timeout=session.manager.settings.step_timeout,
             )
         except Exception as e:
-            raise _translate_failure(e) from None
+            raise translate_call_failure(e) from None
         usage = response.get("usage") if isinstance(response, dict) else None
         return LlmChatResponse(
             status="ok", call_id=call_id, response=response, usage=usage)
@@ -190,12 +229,13 @@ def build_governed_router(
             try:
                 async for chunk in client.stream(
                         messages=req.messages, call_id=call_id, **kwargs):
-                    text, reasoning, chunk_usage = _chunk_fields(chunk)
-                    if chunk_usage is not None:
-                        usage = chunk_usage
-                    if text or reasoning:
-                        yield _sse_frame({"type": "delta", "text": text,
-                                          "reasoning": reasoning})
+                    parsed = parse_stream_chunk(chunk)
+                    if parsed.usage is not None:
+                        usage = parsed.usage
+                    if parsed.text or parsed.reasoning:
+                        yield _sse_frame(
+                            {"type": "delta", "text": parsed.text,
+                             "reasoning": parsed.reasoning})
                 yield _sse_frame({"type": "done", "call_id": call_id,
                                   "usage": usage})
             except Exception as e:
@@ -246,7 +286,7 @@ def build_governed_router(
             # surface them as vocabulary errors, not server errors.
             raise HTTPException(status_code=422, detail=str(e)) from None
         except Exception as e:
-            raise _translate_failure(e) from None
+            raise translate_call_failure(e) from None
         return ToolCallResponse(
             status="ok", call_id=call_id, result=result, origin="executed")
 

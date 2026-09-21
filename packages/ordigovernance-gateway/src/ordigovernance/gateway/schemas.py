@@ -14,10 +14,12 @@ class LlmChatRequest(BaseModel):
     run_id: str | None = None
     task_id: str | None = None
     client: str
-    purpose: str = "n8n-chat"
+    # Orchestrator-neutral defaults (D8); rename history is recorded
+    # in docs/gateway-design.md. The OpenAI-compatible surface keeps
+    # its own default ("openai-compat").
+    purpose: str = "remote-chat"
     messages: list[dict]
     kwargs: dict[str, Any] = Field(default_factory=dict)
-
 
 class LlmChatResponse(BaseModel):
     status: str

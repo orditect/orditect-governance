@@ -17,12 +17,16 @@ from fastapi import FastAPI
 
 from ordigovernance.gateway.config import GatewaySettings
 from ordigovernance.gateway.registry import load_registry
+from ordigovernance.gateway.routes.composites import build_composites_router
 from ordigovernance.gateway.routes.governed import build_governed_router
 from ordigovernance.gateway.routes.hitl import build_hitl_router
+from ordigovernance.gateway.routes.openai_compat import (
+    OpenAICompatError,
+    build_openai_compat_router,
+)
 from ordigovernance.gateway.routes.runs import build_runs_router
 from ordigovernance.gateway.security import build_auth_dependency
 from ordigovernance.gateway.session import SessionManager
-from ordigovernance.gateway.routes.composites import build_composites_router
 
 log = logging.getLogger(__name__)
 
@@ -57,6 +61,16 @@ def build_app(settings: GatewaySettings | None = None,
     app = FastAPI(title="ordigovernance-gateway",
                   version="0.1.0", lifespan=lifespan)
 
+    @app.exception_handler(OpenAICompatError)
+    async def _openai_compat_error_handler(
+            request, exc: OpenAICompatError):
+        """OpenAI error envelopes for the /v1 surface (openai-js
+        parses {error: {message, type}}; the FastAPI default detail
+        shape would surface as an opaque APIError). App-level
+        registration: router-level handlers do not propagate through
+        include_router."""
+        return exc.response
+
     auth = build_auth_dependency(settings.auth_token)
 
     def _manager() -> SessionManager:
@@ -80,4 +94,6 @@ def build_app(settings: GatewaySettings | None = None,
                                          auth_dependency=auth))
     app.include_router(build_composites_router(_manager,
                                                auth_dependency=auth))
+    app.include_router(build_openai_compat_router(_manager,
+                                                  auth_dependency=auth))
     return app

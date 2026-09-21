@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ordigovernance-gateway"
 version = "0.1.0"
-description = "HTTP execution front of the ordigovernance hot path (n8n bridge gateway)"
+description = "HTTP execution front (write path) of the ordigovernance hot path for remote orchestrators"
 requires-python = ">=3.12"
 license = { text = "SUL-1.0" }
 dependencies = [

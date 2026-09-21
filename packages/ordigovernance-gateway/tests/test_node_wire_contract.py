@@ -192,11 +192,11 @@ def test_llm_chat_stream_yields_the_frame_vocabulary(
         assert "".join(f["text"] for f in frames
                        if f["type"] == "delta") == "hello"
         done = frames[-1]
-        # Naming discipline: purpose defaults to n8n-chat, the ephemeral
-        # identity starts with n8n-call-, the seq sits above the agent band.
-        assert done["call_id"].startswith("n8n-chat-n8n-call-")
+        # Naming discipline: the default purpose is remote-chat, the
+        # ephemeral identity starts with remote-call-, the seq sits
+        # above the agent band.
+        assert done["call_id"].startswith("remote-chat-remote-call-")
         assert done["usage"]["total_tokens"] == 4
-
 
 def test_llm_chat_stream_rejects_non_streaming_client(client,
                                                        auth_headers):
@@ -261,4 +261,77 @@ def test_llm_chat_stream_extracts_source_chunk_objects(
                        for f in deltas)
         done = [f for f in frames if f["type"] == "done"]
         assert done and done[-1]["call_id"].startswith(
-            "n8n-chat-n8n-call-")
+            "remote-chat-remote-call-")
+
+    class TestOpenAiCompatSurface:
+        """Wire contracts the n8n BUILT-IN OpenAI Chat Model node consumes
+        (D18). A drift here breaks the n8n credential test, the model
+        dropdown or the openai-js error surfacing -- with every
+        governed-native route unchanged and green. Locked in this
+        node-wire mirror for the same reason as the node bodies: the
+        consumer (n8n's built-in node) cannot lock it itself.
+        """
+
+        def test_models_list_shape_feeds_credential_test_and_dropdown(
+                self, client, auth_headers):
+            resp = client.get("/v1/models", headers=auth_headers)
+            assert resp.status_code == 200
+            body = resp.json()
+            assert set(body) == {"object", "data"}
+            assert body["object"] == "list"
+            assert body["data"], "model dropdown must list the registry"
+            for entry in body["data"]:
+                assert set(entry) == {"id", "object", "created", "owned_by"}
+                assert entry["object"] == "model"
+
+        def test_completion_envelope_field_set(self, client, auth_headers):
+            resp = client.post("/v1/chat/completions", json={
+                "model": "research",
+                "messages": [{"role": "user", "content": "hi"}]},
+                               headers=auth_headers)
+            assert resp.status_code == 200
+            body = resp.json()
+            assert set(body) == {"id", "object", "created", "model",
+                                 "choices", "usage"}
+            assert body["object"] == "chat.completion"
+            assert body["model"] == "research"
+
+        def test_error_envelope_shape(self, client, auth_headers):
+            resp = client.post("/v1/chat/completions", json={
+                "model": "nope", "messages": []}, headers=auth_headers)
+            assert resp.status_code == 422
+            body = resp.json()
+            # openai-js parses {error: {message, type}}; the FastAPI
+            # default {"detail": ...} would surface as an opaque APIError.
+            assert set(body) == {"error"}
+            assert set(body["error"]) == {"message", "type"}
+
+        def test_attribution_promise_of_the_credential_header(
+                self, client, auth_headers):
+            """The n8n credential ships ONE static custom header. The
+            documented configuration is X-Governance-Run-Id: @active, and
+            its contract promise is: never 404 -- with an active run the
+            call attributes to it, without one it degrades to ambient."""
+            no_active = client.post("/v1/chat/completions", json={
+                "model": "research",
+                "messages": [{"role": "user", "content": "a"}]},
+                                    headers={**auth_headers, "X-Governance-Run-Id": "@active"})
+            assert no_active.status_code == 200
+
+            started = client.post("/runs", json={"run_id": "run-wire"},
+                                  headers=auth_headers)
+            assert started.status_code == 201
+            with_active = client.post("/v1/chat/completions", json={
+                "model": "research",
+                "messages": [{"role": "user", "content": "b"}]},
+                                      headers={**auth_headers, "X-Governance-Run-Id": "@active"})
+            assert with_active.status_code == 200
+
+            finished = client.post("/runs/run-wire/finish",
+                                   headers=auth_headers)
+            assert finished.status_code == 200
+            after = client.post("/v1/chat/completions", json={
+                "model": "research",
+                "messages": [{"role": "user", "content": "c"}]},
+                                headers={**auth_headers, "X-Governance-Run-Id": "@active"})
+            assert after.status_code == 200

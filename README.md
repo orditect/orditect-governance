@@ -30,7 +30,7 @@ distributions:
 | `ordigovernance-runtime` | mechanism-direct runtime: governed agents/tools, archive, lifecycle, patterns, streams, replay mechanics |
 | `ordigovernance-testing` | golden trace normalization, conformance kit, in-memory hot-path fixtures, deterministic mocks |
 | `ordigovernance-viewer` | cold-path FastAPI routers + dashboard UI |
-| `ordigovernance-gateway` | HTTP execution front of the hot path (the n8n bridge's WRITE path) |
+| `ordigovernance-gateway` | HTTP execution front (write path) of the hot path for remote orchestrators; n8n is the first-class consumer |
 | `ordigovernance-bridges-*` | thin format-translation shells (direct / langgraph / deepagents) — **verified against real endpoints** |
 
 Naming: the repository is **orditect-governance**, the namespace is

@@ -142,6 +142,17 @@ what they replace (pitfalls §1, §13.10).
 proving governed-call identity across the boundary; keep optional
 framework dependencies behind extras with a clear ImportError.
 
+**Adding an orchestrator integration** (an n8n-style node package, or
+any other ecosystem's client): the integration lives in that
+ecosystem's own repository — a pure HTTP client plus format
+translation over the gateway's surfaces, exactly like
+n8n-nodes-ordigovernance — and never imports governance or engine
+packages. The main repository gains nothing unless the generic
+gateway surface itself needs new capability, which is a design
+decision (D18 documents the OpenAI-compatible surface; a prospective
+D19 covers two-phase external tool execution). Never add an
+ecosystem's SDK as a dependency of packaged code.
+
 **Adding a pattern**: it must be mechanism-shaped — opaque items,
 business facts as callbacks, no vocabulary. If the pattern needs to
 interpret item contents, the interpretation is a callback.

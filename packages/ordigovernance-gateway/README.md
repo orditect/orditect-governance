@@ -1,12 +1,16 @@
 # ordigovernance-gateway
 
 HTTP execution front of the ordigovernance hot path — the WRITE path
-for remote orchestrators (n8n). The viewer routers remain the READ
-path (evidence). HTTP terminates at governed-call / task-action
+for remote orchestrators. n8n is the first-class consumer (via
+[n8n-nodes-ordigovernance](https://github.com/orditect/n8n-nodes-ordigovernance)),
+but every surface serves any HTTP client identically: scripts, CI,
+other node ecosystems, and — through the OpenAI-compatible `/v1`
+surface — any OpenAI-compatible client. The viewer routers remain the
+READ path (evidence). HTTP terminates at governed-call / task-action
 granularity; redis primitives (semaphores, budget, hot records) never
 leave this process.
 
-Design and construction plan: ../../docs/n8n-bridge-design.md
+Design record: ../../docs/gateway-design.md
 
 ## Run
 
@@ -76,13 +80,57 @@ must belong to the addressed session (404 otherwise — the hot path is
 process-global, and a record's existence is not proof of ownership).
 The ambient run is the one documented exemption (D2): run-less
 traffic may attribute to any existing hot record, but never to a
-task_id without one. Omitted, an ephemeral identity is minted.call ids always follow the naming discipline; seq slots
-are per (task_id, purpose) starting above the agent band. `origin`
-is `"executed"` on the open tier (memo reuse is an engine concern).
+task_id without one. Omitted, an ephemeral identity is minted
+(`remote-call-<hex>`). Call ids always follow the naming discipline;
+seq slots are per (task_id, purpose) starting above the agent band
+(the default purpose is `remote-chat`; the OpenAI-compatible surface
+defaults to `openai-compat`). `origin` is `"executed"` on the open
+tier (memo reuse is an engine concern).
 Errors: unknown vocabulary -> 422 listing valid names; unknown task
 -> 404; budget/quota denial -> 409; step timeout -> 504; reserved
 payload keys (`params`, `call_id`, `seq`, ...) -> 422 with a rename
 instruction.
+
+### OpenAI-compatible surface (D18)
+
+    GET  /v1/models               -> {"object": "list", "data": [...]}
+    POST /v1/chat/completions     -> OpenAI chat-completion shape
+
+A protocol envelope over the SAME governed call path as
+`/governed/llm-chat` — governance (semaphores, budget, call_id
+idempotency, audit, D8 identity) applies unchanged underneath.
+Purpose: OpenAI-compatible clients that cannot call the
+governed-native route. n8n's built-in OpenAI Chat Model node points
+here directly:
+
+    Credential -> Base URL: http://<gateway>:8180/v1
+                 API Key:   <GATEWAY_AUTH_TOKEN>
+                 (the credential test and the model dropdown both
+                  read GET /v1/models)
+
+Mapping: body `model` -> the client registry key (vocabulary via
+`GET /v1/models`); `messages` verbatim; `stream`/`stream_options`
+handled by the envelope; every other body field (`tools`,
+`tool_choice`, `temperature`, `stop`, `user`, ...) transported
+opaquely as kwargs. Errors use the OpenAI error envelope
+(`{"error": {"message", "type"}}`). Retry note: an OpenAI SDK retry
+is a fresh governed call (call_id idempotency does not span HTTP
+retries) and may bill twice.
+
+Attribution (priority order):
+
+    X-Governance-Run-Id:   @active    -> the active user run, resolved
+                                         per request; degrades to the
+                                         ambient run when none is
+                                         active (a credential-static
+                                         header that survives run
+                                         turnover)
+    X-Governance-Run-Id:   <run_id>   -> strict; 404 when not active
+    X-Governance-Task-Id:  <task_id>  -> D8 semantics (404 unknown)
+    X-Governance-Purpose:  <purpose>  -> call_id purpose segment
+                                         (default "openai-compat")
+
+Absent headers route to the ambient run (D2).
 
 ### Task plane (active run only)
 

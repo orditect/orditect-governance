@@ -95,7 +95,7 @@ def test_call_identity_mints_ephemeral_and_monotonic_seqs(settings):
         session = manager.ambient
         t1, e1, s1 = _run(session.allocate_call_identity(None, "p"))
         t2, e2, s2 = _run(session.allocate_call_identity(None, "p"))
-        assert t1.startswith("n8n-call-") and t2.startswith("n8n-call-")
+        assert t1.startswith("remote-call-") and t2.startswith("remote-call-")
         # Ephemeral identities are unique per call; each one starts its
         # own (task_id, purpose) counter at the agent band base (D8).
         assert t1 != t2

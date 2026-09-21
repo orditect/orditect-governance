@@ -1,9 +1,11 @@
 """ordigovernance-gateway: HTTP execution front of the governance hot path.
 
 The gateway is the WRITE path (execution front) for remote
-orchestrators (n8n); the viewer routers remain the READ path
-(evidence). Redis primitives never leave this process: HTTP
-terminates at governed-call / task-action granularity.
+orchestrators -- n8n is the first-class consumer, but any HTTP client
+(scripts, CI, other node ecosystems, OpenAI-compatible clients via
+the /v1 surface) consumes the same surfaces. The viewer routers
+remain the READ path (evidence). Redis primitives never leave this
+process: HTTP terminates at governed-call / task-action granularity.
 """
 
 from ordigovernance.gateway.app import build_app
