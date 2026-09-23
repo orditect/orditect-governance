@@ -171,6 +171,17 @@ class AgentContext:
         """The generation's policy resolver (shared by all call paths)."""
         return self._resolver
 
+    @property
+    def llm_params(self) -> dict:
+        """Read-only view of the replay-channel sampling params.
+
+        Additive public surface: engine components building derived
+        contexts (e.g. nested intervals) inherit the experiment's
+        declared sampling params. Returns a copy; mutation never
+        reaches the generation's wiring.
+        """
+        return dict(self._llm_params)
+
     # ---- public read surface for engine components -------------------------
 
     @property
@@ -192,6 +203,17 @@ class AgentContext:
     def llm_registry(self) -> dict[str, LLMChatProtocol]:
         """Read-only view of the B-class client registry (a copy)."""
         return dict(self._llms)
+
+    @property
+    def tool_set(self) -> GovernedToolSet | None:
+        """Nullable view of the wired A-class tool set.
+
+        Additive public surface: unlike `tools` (which raises with
+        guidance when unwired), this returns None so derived contexts
+        (e.g. nested intervals) can mirror the parent's wiring exactly,
+        unwired included.
+        """
+        return self._tools
 
     @property
     def has_memo_layer(self) -> bool:

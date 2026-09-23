@@ -69,18 +69,12 @@ Layering rules are machine-enforced (`scripts/check_import_boundary.py`):
 
 ## Framework dependency
 
-The `orditect-*` framework packages are currently installed from a
-source checkout, not from PyPI:
-
-    # sibling checkout of the orditect repository
-    pip install -e ../orditect/packages/protocol
-    pip install -e ../orditect/packages/core
-    pip install -e ../orditect/packages/flow
-    pip install -e ../orditect/packages/stream
-    pip install -e ../orditect/packages/adapter-memory
-    pip install -e ../orditect/packages/adapter-local
-    pip install -e ../orditect/packages/adapter-ui
-    pip install -e ../orditect/packages/bridge-openai
+All orditect-* framework packages are installed from PyPI:
+```bash
+pip install orditect-protocol orditect-core orditect-flow orditect-stream \
+    orditect-adapter-memory orditect-adapter-local orditect-bridge-openai \
+    orditect-adapter-ui
+```
 
 ## Install
 
